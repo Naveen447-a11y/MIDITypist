@@ -253,11 +253,10 @@ void SendMappingsToUI() {
     bool hasChords = false;
     std::set<int> gestureNotes;
 
-    {
-        std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-        for (const auto& m : g_mappings) {
-            if (m.midi_type == 2) hasChords = true;
-            if (m.gesture_id > 0) gestureNotes.insert(m.midi_num);
+    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+    for (const auto& m : g_mappings) {
+        if (m.midi_type == 2) hasChords = true;
+        if (m.gesture_id > 0) gestureNotes.insert(m.midi_num);
 
         std::wstring targetDisplay;
         if (m.profile_switch >= 0) {
