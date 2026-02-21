@@ -162,25 +162,25 @@
   <main class="main-view">
     <!-- Dynamic Island HUD -->
     <header
-      style="-webkit-app-region: drag; justify-content: space-between !important; padding: 16px 20px 12px 20px !important;">
+      style="-webkit-app-region: drag; justify-content: space-between !important; padding: 16px 12px 12px 12px !important;">
 
-      <!-- Spacer for perfect centering -->
-      <div style="flex: 1; min-width: 60px;"></div>
+      <!-- Spacer for centering (collapses at small sizes) -->
+      <div style="flex: 1; min-width: 8px;"></div>
 
-      <div class="hud-island" id="hudIsland" style="flex-shrink: 1; min-width: 0; margin: 0 16px;">
+      <div class="hud-island" id="hudIsland" style="flex-shrink: 1; min-width: 0; margin: 0 8px; overflow: hidden;">
 
         <!-- MIDI Status Module -->
         <div class="midi-status"
-          style="display:flex; align-items:center; gap:8px; border-right:1px solid rgba(255,255,255,0.1); padding-right:12px; flex-shrink: 0; -webkit-app-region: no-drag;">
+          style="display:flex; align-items:center; gap:6px; border-right:1px solid rgba(255,255,255,0.1); padding-right:10px; flex-shrink: 1; min-width:0; -webkit-app-region: no-drag;">
           <div id="statusDot"
             style="width:7px; height:7px; border-radius:50%; background:var(--error); box-shadow:0 0 8px var(--error); transition:all 0.3s ease; flex-shrink:0;">
           </div>
           <select id="hudMidiPort"
-            style="flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-primary); font-size:11px; font-weight:500; border-radius:6px; padding:4px 6px; outline:none; cursor:pointer; min-width:120px;">
+            style="flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-primary); font-size:11px; font-weight:500; border-radius:6px; padding:4px 6px; outline:none; cursor:pointer; min-width:60px; max-width:160px;">
             <option disabled selected>No Devices</option>
           </select>
           <button id="hudBtnConnect" class="btn-icon"
-            style="padding:4px; background:rgba(255,255,255,0.05); border-radius:6px; border:1px solid rgba(255,255,255,0.1); color:var(--text-secondary); transition:all 0.2s;"
+            style="padding:4px; background:rgba(255,255,255,0.05); border-radius:6px; border:1px solid rgba(255,255,255,0.1); color:var(--text-secondary); transition:all 0.2s; flex-shrink:0;"
             onclick="toggleConnect()" title="Toggle Connection">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"
               stroke-linecap="round" stroke-linejoin="round">
@@ -190,18 +190,18 @@
           </button>
         </div>
 
-        <!-- Active Context Module -->
+        <!-- Active Context Module (hidden when too small) -->
         <div id="activeContext"
-          style="display:flex; align-items:center; gap:14px; padding-left:4px; flex: 1; min-width: 0; max-width: 250px;"
+          style="display:flex; align-items:center; gap:10px; padding-left:4px; flex: 1; min-width: 0; overflow:hidden;"
           class="context-container">
           <div class="hud-icon"
             style="width:32px; height:32px; flex-shrink:0; background:rgba(255,255,255,0.1); border-radius:8px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
             <img src="app_icon.ico" style="width:20px; height:20px; object-fit:contain;">
           </div>
-          <div class="context-content" style="flex: 1; min-width: 0;">
+          <div class="context-content" style="flex: 1; min-width: 0; overflow:hidden;">
             <div style="display:flex; align-items:center; gap:8px;">
               <span id="contextApp"
-                style="font-size:13px; font-weight:600; color:var(--accent); flex-shrink: 0; white-space: nowrap;">System
+                style="font-size:13px; font-weight:600; color:var(--accent); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100px;">System
                 Idle</span>
               <span style="color:rgba(255,255,255,0.2); flex-shrink: 0;">•</span>
               <span id="contextTitle"
@@ -214,15 +214,15 @@
           style="width:1px; height:24px; background:rgba(255,255,255,0.1); margin: 0 4px; flex-shrink: 0;"></div>
 
         <div style="display:flex; gap:6px; flex-shrink: 0; align-items: center; -webkit-app-region: no-drag;">
-          <button class="btn btn-primary" style="padding: 6px 12px; white-space: nowrap;" onclick="startLearn()">Capture
-            Mapping</button>
-          <button class="btn btn-secondary action-manual" style="padding: 6px 12px; white-space: nowrap;"
-            onclick="addMapping()">Manual Entry</button>
+          <button class="btn btn-primary" style="padding: 6px 10px; white-space: nowrap; font-size:12px;"
+            onclick="startLearn()">Capture</button>
+          <button class="btn btn-secondary action-manual"
+            style="padding: 6px 10px; white-space: nowrap; font-size:12px;" onclick="addMapping()">Manual</button>
         </div>
       </div>
 
       <!-- Windows Native Controls (Right Aligned) -->
-      <div style="flex: 1; min-width: 60px; display: flex; justify-content: flex-end; align-items: flex-start;">
+      <div style="flex: 1; min-width: 8px; display: flex; justify-content: flex-end; align-items: flex-start;">
         <div class="traffic-lights"
           style="position: static; margin-top: 4px; display: flex; gap: 8px; -webkit-app-region: no-drag;">
           <div class="dot yellow" onclick="send('minimize_window')"></div>
