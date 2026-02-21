@@ -139,6 +139,14 @@ function updateMappings(list) {
         const card = document.createElement('div');
         card.className = 'mapping-card';
         if (m.enabled === false) card.style.opacity = '0.45';
+
+        // Color-coded left border by mapping type
+        const typeColors = { 0: 'var(--system-blue)', 1: 'var(--system-green)', 2: 'var(--system-purple)', 3: 'var(--system-orange)', 4: 'var(--system-orange)', 5: '#FF375F' };
+        card.style.borderLeftColor = typeColors[m.midi_type] || 'var(--accent)';
+
+        // Stagger animation
+        card.style.animationDelay = `${i * 30}ms`;
+
         card.onclick = () => openEditor(i);
 
         let target = 'HUD';
@@ -265,13 +273,23 @@ function addLog(text, cat) {
     const body = document.getElementById('logBody');
     if (!body) return;
     const div = document.createElement('div');
+    div.className = 'log-entry';
 
-    let color = 'var(--text-secondary)';
-    if (cat === 'error') color = 'var(--error)';
-    if (cat === 'midi-active' || cat === 'mapping') color = 'var(--accent)';
+    // Category-based styling
+    if (cat === 'error') { div.classList.add('log-error'); div.style.color = 'var(--error)'; }
+    else if (cat === 'midi-active' || cat === 'mapping') { div.classList.add('log-midi'); div.style.color = 'var(--accent)'; }
+    else if (cat === 'system') { div.classList.add('log-context'); div.style.color = 'var(--text-secondary)'; }
+    else { div.style.color = 'var(--text-secondary)'; }
 
-    div.style.color = color;
-    div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    // Build entry with timestamp badge
+    const time = document.createElement('span');
+    time.style.cssText = 'color:var(--text-tertiary); font-size:11px; margin-right:8px; font-family:var(--font-mono);';
+    time.textContent = new Date().toLocaleTimeString();
+    div.appendChild(time);
+    const msg = document.createElement('span');
+    msg.textContent = text;
+    div.appendChild(msg);
+
     body.appendChild(div);
     body.scrollTop = body.scrollHeight;
 
@@ -325,13 +343,14 @@ function setStatus(text) {
     const connected = text.includes('Connected') || text.includes('Ready');
 
     if (dot) {
-        dot.style.background = connected ? 'var(--success)' : 'var(--error)';
-        dot.style.boxShadow = connected ? '0 0 8px var(--success)' : '0 0 8px var(--error)';
+        dot.style.background = connected ? 'var(--system-green)' : 'var(--error)';
+        dot.style.boxShadow = connected ? '0 0 8px var(--system-green)' : '0 0 8px var(--error)';
+        dot.className = connected ? 'status-breathing' : '';
     }
 
     if (hudBtn) {
-        hudBtn.style.color = connected ? 'var(--success)' : 'var(--text-secondary)';
-        hudBtn.style.background = connected ? 'color-mix(in srgb, var(--success) 20%, transparent)' : 'rgba(255,255,255,0.05)';
+        hudBtn.style.color = connected ? 'var(--system-green)' : 'var(--text-secondary)';
+        hudBtn.style.background = connected ? 'rgba(40, 200, 64, 0.15)' : 'rgba(255,255,255,0.05)';
         hudBtn.classList.toggle('active', connected);
     }
 
