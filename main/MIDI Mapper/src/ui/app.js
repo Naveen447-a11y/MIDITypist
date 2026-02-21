@@ -69,6 +69,29 @@ function toggleTheme() {
     localStorage.setItem('miditypist-theme', newTheme);
 }
 
+function initTheme() {
+    const savedTheme = localStorage.getItem('miditypist-theme');
+    const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyTheme = (theme) => {
+        document.documentElement.setAttribute('data-theme', theme);
+        if (typeof updateHUDContextStyle === 'function') updateHUDContextStyle();
+    };
+
+    if (savedTheme) {
+        applyTheme(savedTheme);
+    } else {
+        applyTheme(systemDark.matches ? 'dark' : 'light');
+    }
+
+    // Listen for system changes
+    systemDark.addEventListener('change', e => {
+        if (!localStorage.getItem('miditypist-theme')) {
+            applyTheme(e.matches ? 'dark' : 'light');
+        }
+    });
+}
+
 function updateMappings(list) {
     mappings = list;
     const grid = document.getElementById('mapGrid');
@@ -466,8 +489,7 @@ document.addEventListener('mousedown', (e) => {
 });
 // Initial Boot
 document.addEventListener('DOMContentLoaded', () => {
-    const savedTheme = localStorage.getItem('miditypist-theme');
-    if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
+    initTheme();
     initPiano();
     send('init');
 });

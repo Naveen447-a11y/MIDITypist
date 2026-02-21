@@ -515,7 +515,7 @@ input[type="checkbox"] {
 .empty-icon {
   width: 64px;
   height: 64px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-card);
   border-radius: 50%;
   display: flex;
   align-items: center;
