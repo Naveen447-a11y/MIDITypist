@@ -217,6 +217,14 @@ function updateMappings(list) {
         footer.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-top:6px;';
         const badgeRow = document.createElement('div');
         badgeRow.className = 'badge-row';
+        badgeRow.style.cssText = 'display:flex; gap:4px; flex-wrap:wrap; align-items:center;';
+        // Show modifiers as pills
+        if (m.modifiers & 1) { const p = document.createElement('span'); p.style.cssText = 'font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.08);color:var(--text-tertiary);'; p.textContent = 'Ctrl'; badgeRow.appendChild(p); }
+        if (m.modifiers & 2) { const p = document.createElement('span'); p.style.cssText = 'font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.08);color:var(--text-tertiary);'; p.textContent = 'Shift'; badgeRow.appendChild(p); }
+        if (m.modifiers & 4) { const p = document.createElement('span'); p.style.cssText = 'font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.08);color:var(--text-tertiary);'; p.textContent = 'Alt'; badgeRow.appendChild(p); }
+        // Velocity zone badge
+        if (m.vel_zone === 1) { const p = document.createElement('span'); p.style.cssText = 'font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(0,122,255,0.1);color:var(--accent);'; p.textContent = 'Soft'; badgeRow.appendChild(p); }
+        if (m.vel_zone === 2) { const p = document.createElement('span'); p.style.cssText = 'font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(255,59,48,0.1);color:var(--error);'; p.textContent = 'Hard'; badgeRow.appendChild(p); }
         if (m.app_pattern) {
             const pill = document.createElement('span');
             pill.className = 'context-pill';
@@ -277,6 +285,21 @@ function updateMappings(list) {
             card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`;
         });
         grid.appendChild(card);
+    });
+
+    // Update sidebar mapping count badge
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(n => {
+        if (n.textContent.includes('Mappings')) {
+            let badge = n.querySelector('.nav-count');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'nav-count';
+                badge.style.cssText = 'margin-left:auto; font-size:11px; font-weight:600; color:var(--text-tertiary); background:rgba(255,255,255,0.06); padding:1px 7px; border-radius:10px; min-width:20px; text-align:center;';
+                n.appendChild(badge);
+            }
+            badge.textContent = mappings.length;
+        }
     });
 }
 
@@ -665,15 +688,23 @@ function showToast(message, level = 'info') {
     const toast = document.createElement('div');
     toast.className = 'toast-notification';
     const colors = { info: 'var(--accent)', success: 'var(--system-green)', error: 'var(--error)', warning: 'var(--system-yellow)' };
+    const icons = { info: 'ℹ', success: '✓', error: '✗', warning: '⚠' };
     const borderColor = colors[level] || colors.info;
     toast.style.cssText = `
-        pointer-events:auto; background:rgba(30,30,30,0.9); backdrop-filter:blur(20px);
-        border:1px solid ${borderColor}; border-left:3px solid ${borderColor};
-        border-radius:10px; padding:12px 18px; color:var(--text-primary);
-        font-size:13px; font-weight:500; box-shadow:0 8px 32px rgba(0,0,0,0.4);
+        pointer-events:auto; background:rgba(22,22,24,0.92); backdrop-filter:blur(24px);
+        border:1px solid rgba(255,255,255,0.08); border-left:3px solid ${borderColor};
+        border-radius:12px; padding:12px 18px; color:var(--text-primary);
+        font-size:13px; font-weight:500; box-shadow:var(--shadow-lg);
         animation:toastIn 0.3s cubic-bezier(0.16,1,0.3,1); max-width:360px;
+        display:flex; align-items:center; gap:10px;
     `;
-    toast.textContent = message;
+    const iconSpan = document.createElement('span');
+    iconSpan.style.cssText = `color:${borderColor}; font-size:16px; flex-shrink:0;`;
+    iconSpan.textContent = icons[level] || icons.info;
+    toast.appendChild(iconSpan);
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    toast.appendChild(textSpan);
     container.appendChild(toast);
 
     setTimeout(() => {
