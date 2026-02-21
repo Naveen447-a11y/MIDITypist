@@ -165,4 +165,3 @@ Distributed under the MIT License. See `LICENSE` for more information.
 If you find this project helpful, please give it a star on GitHub! For bugs and feature requests, please use the [Issue Tracker](https://github.com/SamuelJoseph23/MIDITypist/issues).
 
 ---
-2026 Samuel Joseph S. Professional MIDI Automation.
