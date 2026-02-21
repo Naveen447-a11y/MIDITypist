@@ -10,6 +10,25 @@ let learnPhase = 0; // 0: Idle, 1: Waiting for MIDI, 2: Waiting for Key
 let searchQuery = ''; // For mapping search filter
 const MAX_LOG_ENTRIES = 500;
 
+// MIDI note name lookup
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function midiNoteName(num) {
+    if (num < 0 || num > 127) return `Note ${num}`;
+    return NOTE_NAMES[num % 12] + (Math.floor(num / 12) - 1);
+}
+
+// VK code to readable name
+const VK_NAMES = {
+    8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Ctrl', 18: 'Alt', 20: 'CapsLock', 27: 'Esc', 32: 'Space',
+    33: 'PgUp', 34: 'PgDn', 35: 'End', 36: 'Home', 37: '←', 38: '↑', 39: '→', 40: '↓', 45: 'Insert', 46: 'Delete',
+    48: '0', 49: '1', 50: '2', 51: '3', 52: '4', 53: '5', 54: '6', 55: '7', 56: '8', 57: '9',
+    65: 'A', 66: 'B', 67: 'C', 68: 'D', 69: 'E', 70: 'F', 71: 'G', 72: 'H', 73: 'I', 74: 'J', 75: 'K', 76: 'L', 77: 'M',
+    78: 'N', 79: 'O', 80: 'P', 81: 'Q', 82: 'R', 83: 'S', 84: 'T', 85: 'U', 86: 'V', 87: 'W', 88: 'X', 89: 'Y', 90: 'Z',
+    91: 'Win', 112: 'F1', 113: 'F2', 114: 'F3', 115: 'F4', 116: 'F5', 117: 'F6', 118: 'F7', 119: 'F8', 120: 'F9',
+    121: 'F10', 122: 'F11', 123: 'F12', 144: 'NumLock', 145: 'ScrollLock', 186: ';', 187: '=', 188: ',', 189: '-', 190: '.', 191: '/', 192: '`', 219: '[', 220: '\\', 221: ']', 222: "'"
+};
+function vkName(code) { return VK_NAMES[code] || `VK ${code}`; }
+
 // --- Bridge: Send commands to C++ ---
 function send(action, data = {}) {
     if (window.chrome?.webview) {
@@ -138,7 +157,7 @@ function updateMappings(list) {
 
         const card = document.createElement('div');
         card.className = 'mapping-card';
-        if (m.enabled === false) card.style.opacity = '0.45';
+        if (m.enabled === false) card.style.opacity = '0.4';
 
         // Color-coded left border by mapping type
         const typeColors = { 0: 'var(--system-blue)', 1: 'var(--system-green)', 2: 'var(--system-purple)', 3: 'var(--system-orange)', 4: 'var(--system-orange)', 5: '#FF375F' };
@@ -149,34 +168,53 @@ function updateMappings(list) {
 
         card.onclick = () => openEditor(i);
 
+        // Build rich content
+        const typeLabels = { 0: 'Note', 1: 'CC', 2: 'Chord', 3: 'HUD', 4: 'Macro', 5: 'AI' };
         let target = 'HUD';
-        if (m.midi_type === 0) target = 'Key ' + m.key_vk;
+        if (m.midi_type === 0) target = vkName(m.key_vk);
+        else if (m.midi_type === 1) target = vkName(m.key_vk);
         else if (m.midi_type === 4) target = 'Macro';
-        else if (m.midi_type === 5) target = 'AI';
-        else if (m.midi_type === 2) target = 'Chord Key ' + m.key_vk;
+        else if (m.midi_type === 5) target = 'AI Prompt';
+        else if (m.midi_type === 2) target = vkName(m.key_vk);
 
         let gesture = m.gesture_id === 1 ? 'DBL' : (m.gesture_id === 2 ? 'HLD' : 'TAP');
-        let titleLine = m.midi_type === 2 ? `Chord [${(m.midi_chord || []).join(',')}]` : `${m.midi_type === 1 ? 'CC' : 'Note'} ${m.midi_num}`;
+        let titleLine = m.midi_type === 2 ? `Chord [${(m.midi_chord || []).map(n => midiNoteName(n)).join(', ')}]` : `${typeLabels[m.midi_type] || 'Note'} ${m.midi_type <= 1 ? midiNoteName(m.midi_num) : m.midi_num}`;
 
-        // Safe DOM construction (no innerHTML for user strings)
+        // Safe DOM construction
         const header = document.createElement('div');
-        header.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start;';
+        header.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+        const titleRow = document.createElement('div');
+        titleRow.style.cssText = 'display:flex; align-items:center; gap:8px;';
+        // Type badge
+        const typeBadge = document.createElement('span');
+        typeBadge.style.cssText = `font-size:9px; font-weight:700; padding:2px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.5px; background:${typeColors[m.midi_type] || 'var(--accent)'}22; color:${typeColors[m.midi_type] || 'var(--accent)'};`;
+        typeBadge.textContent = typeLabels[m.midi_type] || 'Note';
         const titleSpan = document.createElement('span');
-        titleSpan.style.cssText = 'font-weight:700; font-size:14px;';
-        titleSpan.textContent = titleLine;
+        titleSpan.style.cssText = 'font-weight:600; font-size:14px; color:var(--text-primary);';
+        titleSpan.textContent = m.midi_type <= 1 ? midiNoteName(m.midi_num) : titleLine;
+        titleRow.appendChild(typeBadge);
+        titleRow.appendChild(titleSpan);
         const badgeDiv = document.createElement('div');
         badgeDiv.className = 'badge';
         badgeDiv.textContent = gesture;
-        header.appendChild(titleSpan);
+        header.appendChild(titleRow);
         header.appendChild(badgeDiv);
 
-        const targetDiv = document.createElement('div');
-        targetDiv.style.cssText = 'font-size:18px; font-weight:600; color:var(--accent);';
-        targetDiv.textContent = target;
+        // Arrow + Target
+        const targetRow = document.createElement('div');
+        targetRow.style.cssText = 'display:flex; align-items:center; gap:8px; margin:4px 0 0 0;';
+        const arrow = document.createElement('span');
+        arrow.style.cssText = 'color:var(--text-tertiary); font-size:12px;';
+        arrow.textContent = '→';
+        const targetSpan = document.createElement('span');
+        targetSpan.style.cssText = 'font-size:17px; font-weight:700; color:var(--accent);';
+        targetSpan.textContent = target;
+        targetRow.appendChild(arrow);
+        targetRow.appendChild(targetSpan);
 
         const footer = document.createElement('div');
         footer.className = 'mapping-footer';
-        footer.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-top:8px;';
+        footer.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-top:6px;';
         const badgeRow = document.createElement('div');
         badgeRow.className = 'badge-row';
         if (m.app_pattern) {
@@ -187,27 +225,38 @@ function updateMappings(list) {
         }
         const delBtn = document.createElement('button');
         delBtn.className = 'btn';
-        delBtn.style.cssText = 'padding:4px; color:var(--error);';
+        delBtn.style.cssText = 'padding:4px; color:var(--error); opacity:0.6; transition:opacity 0.15s;';
+        delBtn.onmouseenter = () => delBtn.style.opacity = '1';
+        delBtn.onmouseleave = () => delBtn.style.opacity = '0.6';
         delBtn.innerHTML = `<svg style="width:14px; height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
         delBtn.onclick = (e) => { e.stopPropagation(); deleteMapping(i); };
 
-        // Toggle enable/disable button
-        const toggleBtn = document.createElement('button');
-        toggleBtn.className = 'btn';
-        toggleBtn.style.cssText = `padding:4px 6px; font-size:11px; color:${m.enabled !== false ? 'var(--system-green)' : 'var(--text-tertiary)'};`;
-        toggleBtn.textContent = m.enabled !== false ? 'ON' : 'OFF';
-        toggleBtn.onclick = (e) => { e.stopPropagation(); toggleMapping(i); };
+        // Mini toggle switch
+        const toggleWrap = document.createElement('label');
+        toggleWrap.className = 'toggle';
+        toggleWrap.style.cssText = 'width:32px; height:18px; flex-shrink:0;';
+        const toggleInput = document.createElement('input');
+        toggleInput.type = 'checkbox';
+        toggleInput.checked = m.enabled !== false;
+        toggleInput.onclick = (e) => { e.stopPropagation(); toggleMapping(i); };
+        const toggleSlider = document.createElement('div');
+        toggleSlider.className = 'toggle-slider';
+        toggleSlider.style.cssText = 'border-radius:18px;';
+        // Smaller knob for mini toggle
+        toggleSlider.innerHTML = '<style>.toggle[style*="32px"] .toggle-slider::after{width:12px;height:12px;}</style>';
+        toggleWrap.appendChild(toggleInput);
+        toggleWrap.appendChild(toggleSlider);
 
         const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'display:flex; gap:4px; align-items:center;';
-        btnRow.appendChild(toggleBtn);
+        btnRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
+        btnRow.appendChild(toggleWrap);
         btnRow.appendChild(delBtn);
 
         footer.appendChild(badgeRow);
         footer.appendChild(btnRow);
 
         card.appendChild(header);
-        card.appendChild(targetDiv);
+        card.appendChild(targetRow);
         card.appendChild(footer);
         // 3D Tilt Effect Logic
         card.addEventListener('mousemove', (e) => {
