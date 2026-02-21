@@ -115,6 +115,7 @@ body {
   padding: 40px;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   animation: view-fade 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
