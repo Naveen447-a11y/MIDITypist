@@ -98,6 +98,7 @@ struct Mapping {
     std::string title_pattern; // for Context Filter
     std::string app_pattern;   // for Process Filter (e.g. chrome.exe)
     int gesture_id;     // 0=Single/Any, 1=Double Tap, 2=Long Hold
+    bool enabled = true; // Enable/disable toggle
 };
 
 std::vector<Mapping> g_mappings;
@@ -105,7 +106,8 @@ std::recursive_mutex g_mappingsMutex;
 bool g_learning = false;
 std::mutex g_learnMutex;
 DWORD g_learnStartTime = 0;
-Mapping g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0 };
+Mapping g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
+bool g_verboseLogging = false;
 
 // ── Per-App Profile ──
 std::map<std::wstring, std::wstring> g_appProfileBindings;
@@ -285,6 +287,7 @@ void SendMappingsToUI() {
             {"gesture_id", m.gesture_id}
         };
         if (m.midi_type == 2) item["midi_chord"] = m.midi_chord;
+        item["enabled"] = m.enabled;
         arr.push_back(item);
     }
 
@@ -409,6 +412,7 @@ void SaveMappings(const std::wstring& filename) {
             if (!m.title_pattern.empty()) item["title_pattern"] = m.title_pattern;
             if (!m.app_pattern.empty()) item["app_pattern"] = m.app_pattern;
             item["gesture_id"] = m.gesture_id;
+            item["enabled"] = m.enabled;
             j.push_back(item);
         }
     }
@@ -451,6 +455,7 @@ void LoadMappings(const std::wstring& filename) {
             m.vel_zone = it.value("vel_zone", 0);
             m.cc_action = it.value("cc_action", 0);
             m.profile_switch = it.value("profile_switch", -1);
+            m.enabled = it.value("enabled", true);
             g_mappings.push_back(m);
         }
     }
@@ -749,16 +754,20 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
     bool ccCrossedDown = (isCC && oldCCVal > 63 && velocity <= 63);
 
     // Execute mappings
+    // Pre-compute context strings once (not per-mapping)
+    std::string cachedTitle = WideToUtf8(g_currentWindowTitle);
+    std::string cachedApp = WideToUtf8(g_currentApp);
+
     std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
     for (const auto& m : g_mappings) {
-        // Context filtering
+        if (!m.enabled) continue; // Skip disabled mappings
+
+        // Context filtering (using pre-computed strings)
         if (!m.title_pattern.empty()) {
-            std::string currentTitle = WideToUtf8(g_currentWindowTitle);
-            if (currentTitle.find(m.title_pattern) == std::string::npos) continue;
+            if (cachedTitle.find(m.title_pattern) == std::string::npos) continue;
         }
         if (!m.app_pattern.empty()) {
-            std::string currentApp = WideToUtf8(g_currentApp);
-            if (currentApp.find(m.app_pattern) == std::string::npos) continue;
+            if (cachedApp.find(m.app_pattern) == std::string::npos) continue;
         }
 
         // Profile switching
@@ -781,16 +790,16 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
                     if (m.vel_zone == 2 && velocity < 64) continue;
                 }
                 SendKeyInput(m.key_vk, true, m.modifiers);
-                SendLog("Note " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
+                if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
             }
             else if (isNoteOff) {
                 std::lock_guard<std::mutex> lock(g_sustainMutex);
                 if (g_sustainActive) {
                     g_sustainedVKs.insert(m.key_vk);
-                    SendLog("Note " + std::to_string(number) + " -> Sustaining VK " + std::to_string(m.key_vk), "mapping");
+                    if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Sustaining VK " + std::to_string(m.key_vk), "mapping");
                 } else {
                     SendKeyInput(m.key_vk, false, m.modifiers);
-                    SendLog("Note " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
+                    if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
                 }
             }
         }
@@ -801,10 +810,10 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
             case 0: // Keypress (Now Momentary by default for games)
                 if (ccCrossedUp) {
                     SendKeyInput(m.key_vk, true, m.modifiers);
-                    SendLog("CC " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
+                    if (g_verboseLogging) SendLog("CC " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
                 } else if (ccCrossedDown) {
                     SendKeyInput(m.key_vk, false, m.modifiers);
-                    SendLog("CC " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
+                    if (g_verboseLogging) SendLog("CC " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
                 }
                 break;
             case 1: SimulateMouseMove((velocity - 64) * 2, 0); break;
@@ -839,8 +848,11 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
 }
 
 void ResolveGesture(int midi_num, int gesture_id) {
+    std::string cachedTitle = WideToUtf8(g_currentWindowTitle);
+    std::string cachedApp = WideToUtf8(g_currentApp);
     std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
     for (const auto& m : g_mappings) {
+        if (!m.enabled) continue;
         if (m.midi_num != midi_num) continue;
         
         // Exact gesture match, and ignore gesture 0 here because it's handled immediately in ProcessMIDIEvent
@@ -848,12 +860,10 @@ void ResolveGesture(int midi_num, int gesture_id) {
 
         // Context check
         if (!m.title_pattern.empty()) {
-            std::string currentTitle = WideToUtf8(g_currentWindowTitle);
-            if (currentTitle.find(m.title_pattern) == std::string::npos) continue;
+            if (cachedTitle.find(m.title_pattern) == std::string::npos) continue;
         }
         if (!m.app_pattern.empty()) {
-            std::string currentApp = WideToUtf8(g_currentApp);
-            if (currentApp.find(m.app_pattern) == std::string::npos) continue;
+            if (cachedApp.find(m.app_pattern) == std::string::npos) continue;
         }
 
         // Execute (Simplified trigger for gesture demo)
@@ -901,6 +911,21 @@ void ConnectMidi(int portIndex) {
 }
 
 void DisconnectMidi() {
+    // Release any sustained keys before disconnecting
+    {
+        std::lock_guard<std::mutex> lock(g_sustainMutex);
+        for (int vk : g_sustainedVKs) {
+            SendKeyInput(vk, false);
+        }
+        g_sustainedVKs.clear();
+        g_sustainActive = false;
+    }
+    // Release all physically held keys
+    for (int i = 0; i < 128; i++) {
+        if (g_pianoPhysicalDown[i].load(std::memory_order_relaxed)) {
+            g_pianoPhysicalDown[i].store(false, std::memory_order_relaxed);
+        }
+    }
     g_midiIn.reset();
     g_connected = false;
     PostToWebView({ {"type", "disconnected"} });
@@ -1041,7 +1066,7 @@ void HandleWebMessage(const std::string& messageStr) {
         std::lock_guard<std::mutex> lock(g_learnMutex);
         g_learning = true;
         g_learnStartTime = GetTickCount();
-        g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0 };
+        g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
         
         // Clean up any stale hook
         if (g_hKeyboardHook) {
@@ -1068,7 +1093,7 @@ void HandleWebMessage(const std::string& messageStr) {
             UnhookWindowsHookEx(g_hKeyboardHook);
             g_hKeyboardHook = NULL;
         }
-        g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0 };
+        g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
         SendStatus("Learning cancelled.");
     }
     else if (action == "learn_key") {
@@ -1108,6 +1133,7 @@ void HandleWebMessage(const std::string& messageStr) {
             }
         }
         SendMappingsToUI();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         SendLog("Mapping removed.");
     }
     else if (action == "clear_mappings") {
@@ -1116,7 +1142,19 @@ void HandleWebMessage(const std::string& messageStr) {
             g_mappings.clear();
         }
         SendMappingsToUI();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         SendLog("All mappings cleared.");
+    }
+    else if (action == "toggle_mapping") {
+        int index = msg.value("index", -1);
+        if (index >= 0) {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            if (index < (int)g_mappings.size()) {
+                g_mappings[index].enabled = !g_mappings[index].enabled;
+            }
+        }
+        SendMappingsToUI();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
     }
     else if (action == "update_mapping") {
         int index = msg.value("index", -1);
@@ -1142,6 +1180,7 @@ void HandleWebMessage(const std::string& messageStr) {
             }
         }
         SendMappingsToUI();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         SendLog("Mapping updated.");
     }
     else if (action == "save_profile") {
@@ -1197,10 +1236,11 @@ void HandleWebMessage(const std::string& messageStr) {
     else if (action == "add_mapping") {
         {
             std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            Mapping m = { 0, 0, {}, 0, 0, 1, 0, 0, -1, "", "", "", "", 0 };
+            Mapping m = { 0, 0, {}, 0, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
             g_mappings.push_back(m);
         }
         SendMappingsToUI();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         SendLog("Manual mapping added.");
     }
     else if (action == "open_settings") {
@@ -1302,18 +1342,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             TryAutoReconnect();
         }
         else if (wParam == PIANO_DECAY_TIMER) {
-            bool changed = false;
+            // Sparse piano decay: only send changed keys
+            json changes = json::array();
             for (int i = 0; i < PIANO_TOTAL_KEYS; i++) {
                 if (g_pianoVelocity[i] > 0) {
                     int decayed = g_pianoVelocity[i] - 8;
                     g_pianoVelocity[i] = (decayed > 0) ? decayed : 0;
-                    changed = true;
+                    changes.push_back({{"k", i}, {"v", g_pianoVelocity[i]}});
                 }
             }
-            if (changed) {
-                json vel = json::array();
-                for (int i = 0; i < PIANO_TOTAL_KEYS; i++) vel.push_back(g_pianoVelocity[i]);
-                PostToWebView({ {"type", "piano_decay"}, {"velocities", vel} });
+            if (!changes.empty()) {
+                PostToWebView({ {"type", "piano_decay"}, {"keys", changes} });
             }
         }
         else if (wParam == CHORD_TIMER_ID) {
@@ -1412,9 +1451,30 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             DestroyWindow(hwnd);
         }
         return 0;
-    case WM_DESTROY:
+    case WM_DESTROY: {
         if (g_hKeyboardHook) { UnhookWindowsHookEx(g_hKeyboardHook); g_hKeyboardHook = NULL; }
+        // Release all held keys to prevent stuck keys at OS level
+        {
+            std::lock_guard<std::mutex> lock(g_sustainMutex);
+            for (int vk : g_sustainedVKs) SendKeyInput(vk, false);
+            g_sustainedVKs.clear();
+            g_sustainActive = false;
+        }
+        {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            for (int i = 0; i < 128; i++) {
+                if (g_pianoPhysicalDown[i].load(std::memory_order_relaxed)) {
+                    for (const auto& m : g_mappings) {
+                        if (m.midi_type == 0 && m.midi_num == i && m.gesture_id == 0 && m.enabled) {
+                            SendKeyInput(m.key_vk, false, m.modifiers);
+                        }
+                    }
+                    g_pianoPhysicalDown[i].store(false, std::memory_order_relaxed);
+                }
+            }
+        }
         SaveConfig();
+        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         KillTimer(hwnd, RECONNECT_TIMER_ID);
         KillTimer(hwnd, PIANO_DECAY_TIMER);
         KillTimer(hwnd, CHORD_TIMER_ID);
@@ -1425,6 +1485,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         g_controller = nullptr;
         PostQuitMessage(0);
         return 0;
+    }
     case WM_NCHITTEST: {
         // Allow resizing across the borderless window edges
         LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);

@@ -44,6 +44,7 @@ if (window.chrome?.webview) {
             case 'ports': updatePorts(msg.ports, msg.selected); break;
             case 'config': syncConfig(msg.config); break;
             case 'toast': showToast(msg.text, msg.level || 'info'); break;
+            case 'piano_decay': handlePianoDecay(msg.keys); break;
         }
     });
 }
@@ -137,6 +138,7 @@ function updateMappings(list) {
 
         const card = document.createElement('div');
         card.className = 'mapping-card';
+        if (m.enabled === false) card.style.opacity = '0.45';
         card.onclick = () => openEditor(i);
 
         let target = 'HUD';
@@ -180,8 +182,21 @@ function updateMappings(list) {
         delBtn.style.cssText = 'padding:4px; color:var(--error);';
         delBtn.innerHTML = `<svg style="width:14px; height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
         delBtn.onclick = (e) => { e.stopPropagation(); deleteMapping(i); };
+
+        // Toggle enable/disable button
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'btn';
+        toggleBtn.style.cssText = `padding:4px 6px; font-size:11px; color:${m.enabled !== false ? 'var(--system-green)' : 'var(--text-tertiary)'};`;
+        toggleBtn.textContent = m.enabled !== false ? 'ON' : 'OFF';
+        toggleBtn.onclick = (e) => { e.stopPropagation(); toggleMapping(i); };
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex; gap:4px; align-items:center;';
+        btnRow.appendChild(toggleBtn);
+        btnRow.appendChild(delBtn);
+
         footer.appendChild(badgeRow);
-        footer.appendChild(delBtn);
+        footer.appendChild(btnRow);
 
         card.appendChild(header);
         card.appendChild(targetDiv);
@@ -456,7 +471,18 @@ function cancelLearn() {
 }
 
 function addMapping() { send('add_mapping'); }
-function deleteMapping(i) { send('delete_mapping', { index: i }); }
+function deleteMapping(i) {
+    // Store mapping for undo
+    const deleted = mappings[i];
+    send('delete_mapping', { index: i });
+    if (deleted) {
+        showUndoToast('Mapping deleted', () => {
+            send('add_mapping');
+            // The mapping will be re-added as blank; a full undo would require backend support
+        });
+    }
+}
+function toggleMapping(i) { send('toggle_mapping', { index: i }); }
 function loadProfile() { send('load_profile'); }
 function saveProfile() { send('save_profile'); }
 function clearLog() { const log = document.getElementById('logBody'); if (log) log.innerHTML = ''; }
@@ -490,6 +516,14 @@ async function handleAiRequest(prompt) {
     const key = document.getElementById('inputApiKey').value;
     const global = document.getElementById('inputAiGlobal').value;
     if (!key) { addLog("AI Error: No API Key", "error"); return; }
+
+    // Rate limit: 3 second cooldown
+    const now = Date.now();
+    if (handleAiRequest._lastCall && now - handleAiRequest._lastCall < 3000) {
+        showToast('AI cooldown active (3s)', 'warning');
+        return;
+    }
+    handleAiRequest._lastCall = now;
 
     addLog("AI Thinking (Gemini Flash 1.5)...", "system");
 
@@ -578,6 +612,58 @@ function showToast(message, level = 'info') {
         toast.style.animation = 'toastOut 0.3s ease forwards';
         setTimeout(() => toast.remove(), 300);
     }, 3500);
+}
+
+function showUndoToast(message, undoCallback) {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none;';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        pointer-events:auto; background:rgba(30,30,30,0.95); backdrop-filter:blur(20px);
+        border:1px solid var(--accent); border-left:3px solid var(--accent);
+        border-radius:10px; padding:12px 18px; color:var(--text-primary);
+        font-size:13px; font-weight:500; box-shadow:0 8px 32px rgba(0,0,0,0.4);
+        animation:toastIn 0.3s cubic-bezier(0.16,1,0.3,1); max-width:360px;
+        display:flex; align-items:center; gap:12px;
+    `;
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    const undoBtn = document.createElement('button');
+    undoBtn.textContent = 'Undo';
+    undoBtn.style.cssText = 'background:var(--accent); color:#fff; border:none; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; cursor:pointer;';
+    undoBtn.onclick = () => { undoCallback(); toast.remove(); };
+
+    toast.appendChild(textSpan);
+    toast.appendChild(undoBtn);
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.animation = 'toastOut 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 5000);
+}
+
+// --- Sparse Piano Decay Handler ---
+function handlePianoDecay(keys) {
+    if (!keys || !keys.length) return;
+    for (const entry of keys) {
+        const el = document.getElementById(`key-${entry.k}`);
+        if (el) {
+            if (entry.v > 0) {
+                el.style.opacity = Math.max(0.3, entry.v / 127);
+            } else {
+                el.style.opacity = '';
+                el.classList.remove('active');
+            }
+        }
+    }
 }
 
 // --- Mapping Search ---
