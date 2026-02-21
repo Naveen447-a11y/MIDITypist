@@ -84,6 +84,9 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x86\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -101,6 +104,9 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x86\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -116,6 +122,9 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x64\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -133,6 +142,9 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x64\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
@@ -149,9 +161,6 @@
     <None Include="src\ui\index.html" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <PropertyGroup>
-    <PostBuildEvent>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</PostBuildEvent>
-  </PropertyGroup>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\Microsoft.Web.WebView2.targets')" />
   </ImportGroup>
