@@ -105,7 +105,7 @@ std::vector<Mapping> g_mappings;
 std::recursive_mutex g_mappingsMutex;
 bool g_learning = false;
 std::mutex g_learnMutex;
-DWORD g_learnStartTime = 0;
+ULONGLONG g_learnStartTime = 0;
 Mapping g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
 bool g_verboseLogging = false;
 
@@ -117,7 +117,7 @@ HWINEVENTHOOK g_hWinEventHook = nullptr;
 
 // ── Gesture State ──
 struct KeyState {
-    DWORD lastPressTime = 0;
+    ULONGLONG lastPressTime = 0;
     int tapCount = 0;
     bool processingGesture = false;
     bool holdTriggered = false;
@@ -170,8 +170,8 @@ HHOOK g_hKeyboardHook = NULL;
 std::atomic<bool> g_chordsEnabled{false};
 std::set<int> g_gestureNotes; // Notes that actually have gesture mappings
 std::mutex g_gestureNotesMutex;
-DWORD g_lastUiPushTime = 0;
-const DWORD UI_THROTTLE_MS = 16; // ~60fps for UI updates
+ULONGLONG g_lastUiPushTime = 0;
+const ULONGLONG UI_THROTTLE_MS = 16; // ~60fps for UI updates
 const std::string APP_VERSION = "1.1";
 
 
@@ -396,6 +396,7 @@ void SimulateText(const std::string& text) {
 // ══════════════════════════════════════════
 
 void SaveMappings(const std::wstring& filename) {
+    // Serialize under lock, then write asynchronously to avoid blocking UI
     json j = json::array();
     {
         std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
@@ -416,8 +417,11 @@ void SaveMappings(const std::wstring& filename) {
             j.push_back(item);
         }
     }
-    std::ofstream f(filename);
-    if (f) f << j.dump(4);
+    // Async file write to prevent UI thread blocking on disk I/O
+    std::thread([filename, j]() {
+        std::ofstream f(filename);
+        if (f) f << j.dump(4);
+    }).detach();
 }
 
 void LoadMappings(const std::wstring& filename) {
@@ -671,7 +675,7 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
         g_pianoVelocity[number] = velocity;
         
         // UI Throttling
-        DWORD now = GetTickCount();
+        ULONGLONG now = GetTickCount64();
         if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
             PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", velocity} });
             g_lastUiPushTime = now;
@@ -686,7 +690,7 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
         if (hasGesture) {
             std::lock_guard<std::mutex> lock(g_gestureMutex);
             auto& state = g_keyStates[number];
-            DWORD pressTime = GetTickCount();
+            ULONGLONG pressTime = GetTickCount64();
             if (pressTime - state.lastPressTime < GESTURE_WINDOW_MS) {
                 state.tapCount++;
             } else {
@@ -701,7 +705,7 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
     else if (isNoteOff && number >= 0 && number < 128) {
         g_pianoVelocity[number] = 0;
         
-        DWORD now = GetTickCount();
+        ULONGLONG now = GetTickCount64();
         if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
             PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", 0} });
             g_lastUiPushTime = now;
@@ -715,7 +719,7 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
         if (hasGestureOff) {
             std::lock_guard<std::mutex> lock(g_gestureMutex);
             auto& state = g_keyStates[number];
-            DWORD duration = GetTickCount() - state.lastPressTime;
+            ULONGLONG duration = GetTickCount64() - state.lastPressTime;
             if (duration >= LONG_HOLD_MS && !state.holdTriggered) {
                 state.holdTriggered = true;
                 KillTimer(g_hwndMain, GESTURE_TIMER_ID + number);
@@ -1057,6 +1061,10 @@ void HandleWebMessage(const std::string& messageStr) {
     else if (action == "toggle_connect") {
         if (!g_connected) {
             int port = msg.value("port", 0);
+            if (port < 0 || port >= (int)g_ports.size()) {
+                SendLog("Invalid port index: " + std::to_string(port), "error");
+                return;
+            }
             ConnectMidi(port);
         } else {
             DisconnectMidi();
@@ -1065,7 +1073,7 @@ void HandleWebMessage(const std::string& messageStr) {
     else if (action == "start_learn") {
         std::lock_guard<std::mutex> lock(g_learnMutex);
         g_learning = true;
-        g_learnStartTime = GetTickCount();
+        g_learnStartTime = GetTickCount64();
         g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
         
         // Clean up any stale hook
@@ -1397,7 +1405,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         std::lock_guard<std::mutex> lock(g_learnMutex);
         if (g_learning && g_learn_pending.midi_type == -1) {
             // Grace period: ignore events too close to start
-            if (GetTickCount() - g_learnStartTime < 200) {
+            if (GetTickCount64() - g_learnStartTime < 200) {
                 return 0;
             }
 

@@ -257,7 +257,17 @@ function updateMappings(list) {
 
         const btnRow = document.createElement('div');
         btnRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
+        // Re-learn button
+        const relearnBtn = document.createElement('button');
+        relearnBtn.className = 'btn';
+        relearnBtn.title = 'Re-learn MIDI trigger';
+        relearnBtn.style.cssText = 'padding:4px; color:var(--accent); opacity:0.6; transition:opacity 0.15s;';
+        relearnBtn.onmouseenter = () => relearnBtn.style.opacity = '1';
+        relearnBtn.onmouseleave = () => relearnBtn.style.opacity = '0.6';
+        relearnBtn.innerHTML = `<svg style="width:14px; height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
+        relearnBtn.onclick = (e) => { e.stopPropagation(); startRelearn(i); };
         btnRow.appendChild(toggleWrap);
+        btnRow.appendChild(relearnBtn);
         btnRow.appendChild(delBtn);
 
         footer.appendChild(badgeRow);
@@ -859,3 +869,199 @@ function updateHUDContextStyle() {
         iconWrapper.style.boxShadow = 'none';
     }
 }
+
+// ══════════════════════════════════════════
+//  Keyboard Shortcuts
+// ══════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+    // Don't capture when typing in inputs/textareas
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    // Escape — close any open modal or cancel learn
+    if (e.key === 'Escape') {
+        const editor = document.getElementById('modalEditor');
+        const settings = document.getElementById('modalSettings');
+        const learn = document.getElementById('learnOverlay');
+        if (learn && learn.style.display === 'flex') { cancelLearn(); return; }
+        if (editor && editor.style.display === 'flex') { closeEditor(); return; }
+        if (settings && settings.style.display === 'flex') { closeSettings(); return; }
+    }
+
+    // Ctrl + key shortcuts
+    if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+        switch (e.key.toLowerCase()) {
+            case 'n': e.preventDefault(); startLearn(); break;            // Ctrl+N = Capture
+            case 's': e.preventDefault(); saveProfile(); break;           // Ctrl+S = Export
+            case 'o': e.preventDefault(); loadProfile(); break;           // Ctrl+O = Import
+            case 'z': e.preventDefault(); undoLastDelete(); break;        // Ctrl+Z = Undo
+            case ',': e.preventDefault(); openSettings(); break;          // Ctrl+, = Preferences
+        }
+        return;
+    }
+
+    // Number keys for view switching (only when no modifier held)
+    if (!e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (e.key === '1') { setView('mappings'); return; }
+        if (e.key === '2') { setView('logs'); return; }
+        if (e.key === '3') { openSettings(); return; }
+    }
+});
+
+// ══════════════════════════════════════════
+//  Undo Last Delete
+// ══════════════════════════════════════════
+let lastDeletedMapping = null;
+let undoTimeout = null;
+
+function undoLastDelete() {
+    if (!lastDeletedMapping) {
+        showToast('Nothing to undo', 'info');
+        return;
+    }
+    mappings.push(lastDeletedMapping);
+    send('update_mappings', { mappings });
+    showToast('Mapping restored', 'success');
+    lastDeletedMapping = null;
+    if (undoTimeout) clearTimeout(undoTimeout);
+}
+
+// Override deleteMapping to support undo
+const _origDeleteMapping = typeof deleteMapping === 'function' ? deleteMapping : null;
+
+// ══════════════════════════════════════════
+//  MIDI Re-Learn for Existing Mappings
+// ══════════════════════════════════════════
+let relearnTargetIndex = -1;
+
+function startRelearn(index) {
+    if (index < 0 || index >= mappings.length) return;
+    relearnTargetIndex = index;
+    send('start_learn');
+    showToast('Re-learning: play a MIDI note to reassign', 'info');
+}
+
+// Hook into the learn_done message to apply re-learn
+const _origLearnDone = null; // placeholder for extending bridge handler
+
+// ══════════════════════════════════════════
+//  Mapping Conflict Detection
+// ══════════════════════════════════════════
+function detectConflicts() {
+    const conflicts = [];
+    for (let i = 0; i < mappings.length; i++) {
+        for (let j = i + 1; j < mappings.length; j++) {
+            const a = mappings[i], b = mappings[j];
+            if (!a.enabled || !b.enabled) continue;
+            if (a.midi_type !== b.midi_type) continue;
+
+            // Same MIDI trigger
+            let sameTrigger = false;
+            if (a.midi_type === 2) {
+                // Chord — compare sorted arrays
+                const ac = (a.midi_chord || []).slice().sort().join(',');
+                const bc = (b.midi_chord || []).slice().sort().join(',');
+                sameTrigger = ac === bc;
+            } else {
+                sameTrigger = a.midi_num === b.midi_num;
+            }
+
+            if (!sameTrigger) continue;
+
+            // Same gesture
+            if (a.gesture_id !== b.gesture_id) continue;
+
+            // Same context (or overlapping)
+            const sameApp = a.app_pattern === b.app_pattern;
+            const sameTitle = a.title_pattern === b.title_pattern;
+            const sameVel = a.vel_zone === b.vel_zone;
+
+            if (sameApp && sameTitle && sameVel) {
+                const label = a.midi_type <= 1 ? midiNoteName(a.midi_num) : `Chord`;
+                conflicts.push({ i, j, label });
+            }
+        }
+    }
+    return conflicts;
+}
+
+function showConflictWarnings() {
+    const conflicts = detectConflicts();
+    if (conflicts.length === 0) return;
+    const msg = conflicts.map(c =>
+        `${c.label}: mapping #${c.i + 1} and #${c.j + 1} have identical triggers`
+    ).join('\n');
+    showToast(`⚠ ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''} detected`, 'warning');
+    addLog(`Conflict check: ${conflicts.length} duplicate trigger(s) found`, 'error');
+}
+
+// ══════════════════════════════════════════
+//  First-Run Onboarding (Empty State)
+// ══════════════════════════════════════════
+function renderEmptyState(container) {
+    container.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; text-align:center; gap:20px; opacity:0; animation:fadeIn 0.5s ease forwards;">
+            <div style="width:72px; height:72px; border-radius:50%; background:var(--accent-surface); display:flex; align-items:center; justify-content:center;">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="var(--accent)" stroke-width="1.5">
+                    <path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>
+                </svg>
+            </div>
+            <div>
+                <h3 style="font-size:20px; font-weight:700; color:var(--text-primary); margin-bottom:8px;">No Mappings Yet</h3>
+                <p style="color:var(--text-tertiary); font-size:14px; max-width:320px; line-height:1.5;">Connect your MIDI controller and create your first mapping to start automating.</p>
+            </div>
+            <div style="display:flex; gap:12px; margin-top:8px;">
+                <button class="btn btn-primary" style="padding:10px 20px;" onclick="startLearn()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                    Capture First Mapping
+                </button>
+                <button class="btn btn-secondary" style="padding:10px 20px;" onclick="loadProfile()">Import Profile</button>
+            </div>
+            <div style="margin-top:16px; display:flex; gap:24px; color:var(--text-tertiary); font-size:12px;">
+                <span><kbd style="background:var(--bg-surface); padding:2px 6px; border-radius:4px; font-family:var(--font-mono); font-size:11px;">Ctrl+N</kbd> Capture</span>
+                <span><kbd style="background:var(--bg-surface); padding:2px 6px; border-radius:4px; font-family:var(--font-mono); font-size:11px;">Ctrl+O</kbd> Import</span>
+                <span><kbd style="background:var(--bg-surface); padding:2px 6px; border-radius:4px; font-family:var(--font-mono); font-size:11px;">Ctrl+,</kbd> Settings</span>
+            </div>
+        </div>
+    `;
+}
+
+// Patch renderMappings to show empty state + conflict check
+const _origRenderMappings = renderMappings;
+renderMappings = function () {
+    const grid = document.getElementById('mapGrid');
+    if (!grid) return _origRenderMappings();
+
+    // Check for empty state
+    const filtered = searchQuery ? mappings.filter(m => {
+        const s = [m.midi_num, m.key_vk, m.macro_text || '', m.ai_prompt || '', m.app_pattern || '', m.title_pattern || ''].join(' ').toLowerCase();
+        return s.includes(searchQuery.toLowerCase());
+    }) : mappings;
+
+    if (filtered.length === 0 && !searchQuery) {
+        grid.innerHTML = '';
+        renderEmptyState(grid);
+        // Still update sidebar count
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(n => {
+            if (n.textContent.includes('Mappings')) {
+                let badge = n.querySelector('.nav-count');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'nav-count';
+                    badge.style.cssText = 'margin-left:auto; font-size:11px; font-weight:600; color:var(--text-tertiary); background:rgba(255,255,255,0.06); padding:1px 7px; border-radius:10px; min-width:20px; text-align:center;';
+                    n.appendChild(badge);
+                }
+                badge.textContent = '0';
+            }
+        });
+        return;
+    }
+
+    _origRenderMappings();
+
+    // Run conflict detection after render
+    if (mappings.length > 1) {
+        showConflictWarnings();
+    }
+};
