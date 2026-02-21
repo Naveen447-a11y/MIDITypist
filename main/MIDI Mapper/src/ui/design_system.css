@@ -1,86 +1,86 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  /* --- Professional Palette (Glassmorphism 2.0) --- */
-  --accent: #3E8BFF;
-  --accent-glow: rgba(62, 139, 255, 0.4);
-  --accent-soft: rgba(62, 139, 255, 0.12);
+  /* --- macOS Sonoma Design Tokens --- */
+  --system-blue: #007AFF;
+  --system-red: #FF5F57;
+  --system-yellow: #FEBC2E;
+  --system-green: #28C840;
 
-  --success: #32D74B;
-  --error: #FF453A;
-  --warning: #FFD60A;
+  --bg-sidebar: rgba(25, 25, 25, 0.4);
+  --bg-main: #000000;
+  /* Pitch black primary background */
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-card-hover: rgba(255, 255, 255, 0.1);
+  --bg-input: rgba(0, 0, 0, 0.2);
 
-  --font-main: 'Outfit', -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.45);
 
-  /* --- Dark Theme (Default) --- */
-  --bg-app: #000000;
-  --bg-sidebar: rgba(18, 18, 20, 0.85);
-  /* Glassy */
-  --bg-card: rgba(255, 255, 255, 0.04);
-  --bg-card-hover: rgba(255, 255, 255, 0.07);
-  --bg-input: rgba(0, 0, 0, 0.35);
-  --bg-tooltip: #1C1C1E;
+  --accent: var(--system-blue);
+  --accent-glow: rgba(0, 122, 255, 0.4);
+  --accent-soft: rgba(0, 122, 255, 0.15);
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-highlight: rgba(255, 255, 255, 0.15);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-highlight: rgba(255, 255, 255, 0.2);
 
-  --text-primary: #F2F2F7;
-  --text-secondary: rgba(235, 235, 245, 0.65);
-  --text-tertiary: rgba(235, 235, 245, 0.35);
-
-  --radius-xl: 20px;
-  --radius-lg: 14px;
+  --radius-xl: 14px;
+  --radius-lg: 12px;
   --radius-md: 10px;
-  --radius-sm: 6px;
+  --radius-sm: 8px;
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
-  --glass-blur: 32px;
-
+  --glass-blur: 40px;
   --transition: 0.25s cubic-bezier(0.2, 0, 0, 1);
+  --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
 }
 
 [data-theme="light"] {
-  --bg-app: #F2F2F7;
-  --bg-sidebar: rgba(255, 255, 255, 0.75);
-  --bg-card: #FFFFFF;
-  --bg-card-hover: #F8F8F9;
-  --bg-input: #EFEFF4;
+  --bg-sidebar: rgba(240, 240, 240, 0.5);
+  --bg-main: #F5F5F7;
+  /* Solid background for light mode */
+  --bg-card: rgba(0, 0, 0, 0.03);
+  --bg-card-hover: rgba(0, 0, 0, 0.08);
+  --bg-input: rgba(255, 255, 255, 0.6);
+  --text-primary: #1D1D1F;
+  --text-secondary: #424245;
+  --text-tertiary: #86868B;
   --border: rgba(0, 0, 0, 0.08);
-  --text-primary: #1C1C1E;
-  --text-secondary: #636366;
-  --text-tertiary: #AEAEB2;
-  --accent-soft: rgba(62, 139, 255, 0.08);
+  --border-highlight: rgba(0, 0, 0, 0.12);
 }
 
-/* --- Base Layout --- */
+/* --- Core Layout --- */
 * {
-  box-sizing: border-box;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
+  user-select: none;
 }
 
 body {
   font-family: var(--font-main);
-  background: var(--bg-app);
+  background: var(--bg-main);
   color: var(--text-primary);
   height: 100vh;
   overflow: hidden;
   display: flex;
   transition: background var(--transition);
+  letter-spacing: -0.011em;
+  position: relative;
 }
 
 .sidebar {
-  width: 280px;
+  width: 240px;
   background: var(--bg-sidebar);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 32px 16px;
+  padding: 32px 16px 24px 16px;
+  /* Top space is sufficient, now just give the content below room */
   z-index: 10;
 }
 
@@ -90,6 +90,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  background: var(--bg-main);
 }
 
 .view-section {
@@ -117,27 +118,38 @@ body {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
-  border-radius: var(--radius-md);
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: all var(--transition);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .nav-item:hover {
-  background: var(--bg-card-hover);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
   transform: translateX(4px);
 }
 
 .nav-item.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border: 1px solid var(--border-highlight);
+  background: var(--accent);
+  color: #FFFFFF;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
+.icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+}
+
+.nav-item.active .icon-box {
+  opacity: 1;
 }
 
 /* --- Mapping Grid --- */
@@ -156,34 +168,19 @@ body {
   transition: all var(--transition);
   cursor: pointer;
   overflow: hidden;
-}
-
-.mapping-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, var(--accent-soft) 0%, transparent 100%);
-  opacity: 0;
-  transition: opacity var(--transition);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .mapping-card:hover {
   background: var(--bg-card-hover);
-  border-color: var(--accent);
+  border-color: var(--border-highlight);
   transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
-}
-
-.mapping-card:hover::before {
-  opacity: 1;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
 }
 
 .badge {
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
   background: var(--bg-input);
@@ -193,12 +190,12 @@ body {
 }
 
 .context-pill {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
   background: var(--bg-input);
-  padding: 4px 10px;
-  border-radius: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
 }
 
 /* --- Buttons & Controls --- */
@@ -206,24 +203,25 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 20px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   transition: all var(--transition);
+  gap: 8px;
 }
 
 .btn-primary {
   background: var(--accent);
   color: #FFF;
-  box-shadow: 0 4px 12px var(--accent-glow);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .btn-primary:hover {
-  filter: brightness(1.2);
-  transform: scale(1.02);
+  background: #0066D6;
 }
 
 .btn-secondary {
@@ -235,6 +233,35 @@ body {
 .btn-secondary:hover {
   background: var(--bg-card-hover);
   border-color: var(--border-highlight);
+}
+
+/* --- Traffic Lights --- */
+.traffic-lights {
+  display: flex;
+  gap: 8px;
+  z-index: 100;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.dot.red {
+  background: var(--system-red);
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
+}
+
+.dot.yellow {
+  background: var(--system-yellow);
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
+}
+
+.dot.green {
+  background: var(--system-green);
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
 }
 
 /* --- Input Elements --- */
@@ -275,38 +302,92 @@ select:focus {
   background: var(--text-tertiary);
 }
 
-/* --- Piano Dashboard --- */
+/* --- Dynamic Island HUD --- */
+header {
+  height: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 12px 40px !important;
+  border-bottom: none !important;
+  background: transparent !important;
+  z-index: 5;
+}
+
+.hud-island {
+  background: rgba(30, 30, 30, 0.75);
+  backdrop-filter: blur(30px) saturate(210%);
+  -webkit-backdrop-filter: blur(30px) saturate(210%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 40px;
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hud-island:hover {
+  transform: scale(1.02);
+  background: rgba(40, 40, 40, 0.85);
+}
+
+/* --- Dynamic Island Animations --- */
+.context-container {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+  transform-origin: left center;
+}
+
+.context-transition .context-content {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  filter: blur(2px);
+}
+
+.context-content {
+  transition: all 0.4s cubic-bezier(0.3, 0.8, 0.2, 1);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+/* --- Piano Dashboard (Dock Style) --- */
 #pianoDashboard {
-  gap: 2px !important;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0.2) 100%) !important;
-  backdrop-filter: blur(24px) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5) !important;
+  border: 1px solid var(--border) !important;
+  padding: 12px 14px !important;
+  gap: 1.5px !important;
+  height: 90px !important;
+  margin: 12px 16px;
+  border-radius: var(--radius-lg);
+  display: flex !important;
 }
 
 .piano-key {
   flex: 1;
-  height: 85%;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-top: none;
-  border-radius: 0 0 5px 5px;
-  transition: all 0.1s cubic-bezier(0.1, 0, 0, 1);
+  height: 90%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0 0 3px 3px;
+  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
   position: relative;
-  min-width: 4px;
 }
 
 .piano-key.black {
-  height: 52%;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #111;
+  height: 55%;
   z-index: 2;
-  margin-left: -1%;
-  margin-right: -1%;
+  margin-left: -5px;
+  margin-right: -5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .piano-key.active {
   background: var(--accent) !important;
-  box-shadow: 0 0 20px var(--accent-glow), inset 0 0 10px rgba(255, 255, 255, 0.2);
-  transform: translateY(3px);
+  box-shadow: 0 0 15px var(--accent-glow);
+  transform: translateY(2px);
   border-color: var(--accent);
 }
 
@@ -332,32 +413,31 @@ select:focus {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: var(--bg-input);
-  transition: .4s;
+  background-color: rgba(255, 255, 255, 0.1);
+  transition: .3s;
   border-radius: 24px;
-  border: 1px solid var(--border);
 }
 
 input:checked+.toggle-slider {
-  background-color: var(--accent-soft);
-  border-color: var(--accent);
+  background-color: var(--system-green);
 }
 
 .toggle-slider::after {
   content: "";
   position: absolute;
-  height: 16px;
-  width: 16px;
+  height: 18px;
+  width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: var(--text-tertiary);
-  transition: .4s;
+  background-color: white;
+  transition: .3s cubic-bezier(0.2, 0, 0, 1);
   border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 input:checked+.toggle-slider::after {
   transform: translateX(20px);
-  background-color: var(--accent);
+
 }
 
 .hud-box {
@@ -389,4 +469,119 @@ select {
 
 input[type="checkbox"] {
   cursor: pointer;
+}
+
+/* --- Modal Animations --- */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(8px);
+  }
+}
+
+/* --- Empty State --- */
+.empty-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  color: var(--text-tertiary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.empty-state h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.empty-state p {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  margin-bottom: 24px;
+  max-width: 300px;
+  line-height: 1.5;
+}
+
+/* --- HUD Context Pulse --- */
+@keyframes pulseGlow {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+  }
+
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.hud-pulse {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 900px) {
+  .hud-island {
+    padding: 6px 14px !important;
+    gap: 12px !important;
+  }
+
+  .midi-status {
+    display: none !important;
+  }
+
+  .divider {
+    display: none !important;
+  }
+
+  .action-manual {
+    display: none !important;
+  }
+
+  #contextTitle {
+    max-width: 100px !important;
+  }
 }

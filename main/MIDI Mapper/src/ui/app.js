@@ -29,11 +29,13 @@ if (window.chrome?.webview) {
                 learnPhase = msg.phase;
                 const promptEl = document.getElementById('learnPrompt');
                 if (promptEl) promptEl.textContent = msg.text;
+                updateHUDContextStyle();
                 break;
             case 'learn_done':
                 learnPhase = 0;
                 const overlay = document.getElementById('learnOverlay');
                 if (overlay) overlay.style.display = 'none';
+                updateHUDContextStyle();
                 break;
             case 'log': addLog(msg.text, msg.category); break;
             case 'run_ai': handleAiRequest(msg.prompt); break;
@@ -61,9 +63,10 @@ function setView(viewId) {
 
 function toggleTheme() {
     const html = document.documentElement;
-    const theme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', theme);
-    localStorage.setItem('miditypist-theme', theme);
+    const currentTheme = html.getAttribute('data-theme') || 'dark';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', newTheme);
+    localStorage.setItem('miditypist-theme', newTheme);
 }
 
 function updateMappings(list) {
@@ -72,6 +75,25 @@ function updateMappings(list) {
     if (!grid) return;
     grid.innerHTML = '';
 
+    if (mappings.length === 0) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+                        <line x1="6" y1="8" x2="6" y2="16"></line>
+                        <line x1="10" y1="8" x2="10" y2="16"></line>
+                        <line x1="14" y1="8" x2="14" y2="16"></line>
+                        <line x1="18" y1="8" x2="18" y2="16"></line>
+                    </svg>
+                </div>
+                <h3>No automation profiles yet.</h3>
+                <p>Start by capturing your first MIDI-to-Keyboard mapping.</p>
+                <button class="btn btn-primary" onclick="startLearn()">Capture Mapping</button>
+            </div>
+        `;
+        return;
+    }
     mappings.forEach((m, i) => {
         const card = document.createElement('div');
         card.className = 'mapping-card';
@@ -101,6 +123,24 @@ function updateMappings(list) {
         </button>
       </div>
     `;
+        // 3D Tilt Effect Logic
+        card.addEventListener('mousemove', (e) => {
+            const rect = card.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+
+            // Calculate tilt limits
+            const rotateX = ((y - centerY) / centerY) * -5; // max 5 deg
+            const rotateY = ((x - centerX) / centerX) * 5;  // max 5 deg
+
+            card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+        });
+
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`;
+        });
         grid.appendChild(card);
     });
 }
@@ -164,10 +204,31 @@ function updateContext(app, title) {
     if (title === "Task Switching") return;
     if (app === "explorer.exe" && !title) return;
 
+    const ctxEl = document.getElementById('activeContext');
     const appEl = document.getElementById('contextApp');
     const titleEl = document.getElementById('contextTitle');
-    if (appEl) appEl.textContent = app || 'Desktop';
-    if (titleEl) titleEl.textContent = title || 'Untitled';
+
+    if (!appEl || !titleEl) return;
+
+    // Check if it's actually changing to avoid unnecessary flashing
+    if (appEl.textContent === (app || 'Desktop') && titleEl.textContent === (title || 'Untitled')) {
+        return;
+    }
+
+    // 1. Start transition (fade out, scale down)
+    if (ctxEl) ctxEl.classList.add('context-transition');
+
+    // 2. Wait for fade out, swap text, fade back in
+    setTimeout(() => {
+        appEl.textContent = app || 'Desktop';
+        titleEl.textContent = title || 'Untitled';
+
+        if (ctxEl) {
+            // Force a reflow so the browser registers the text change before removing the class
+            void ctxEl.offsetWidth;
+            ctxEl.classList.remove('context-transition');
+        }
+    }, 150); // Match this roughly to the CSS transition time
 
     addLog(`Context: ${app} | ${title}`, 'system');
 }
@@ -180,6 +241,7 @@ function setStatus(text) {
     if (label) label.textContent = text;
     if (dot) dot.style.background = (text.includes('Connected') || text.includes('Ready')) ? 'var(--success)' : 'var(--error)';
     if (btn) btn.textContent = text.includes('Connected') ? 'Disconnect' : 'Connect';
+    updateHUDContextStyle();
 }
 
 function updatePorts(ports, selectedIdx) {
@@ -236,7 +298,13 @@ function openEditor(i) {
 
 function closeEditor() {
     const modal = document.getElementById('modalEditor');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.animation = 'fadeOut 0.2s ease forwards';
+        setTimeout(() => {
+            modal.style.display = 'none';
+            modal.style.animation = 'fadeIn 0.2s ease';
+        }, 200);
+    }
 }
 
 function toggleEditFields() {
@@ -359,6 +427,43 @@ async function handleAiRequest(prompt) {
     }
 }
 
+// --- macOS Style Settings Modal ---
+function openSettings() {
+    const modal = document.getElementById('modalSettings');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeSettings() {
+    const modal = document.getElementById('modalSettings');
+    if (modal) {
+        modal.style.animation = 'fadeOut 0.2s ease forwards';
+        setTimeout(() => {
+            modal.style.display = 'none';
+            modal.style.animation = 'fadeIn 0.2s ease';
+        }, 200);
+    }
+}
+
+// --- Window Dragging ---
+document.addEventListener('mousedown', (e) => {
+    // Check if clicked element or its parents have webkit-app-region: drag
+    let el = e.target;
+    while (el) {
+        const style = window.getComputedStyle(el);
+        if (style.webkitAppRegion === 'no-drag') {
+            return; // Clicked on an interactive element inside a drag region
+        }
+        if (style.webkitAppRegion === 'drag') {
+            // Prevent default to stop text selection, but allow interaction with inputs
+            if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+            }
+            send('drag_window');
+            return;
+        }
+        el = el.parentElement;
+    }
+});
 // Initial Boot
 document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = localStorage.getItem('miditypist-theme');
@@ -366,3 +471,29 @@ document.addEventListener('DOMContentLoaded', () => {
     initPiano();
     send('init');
 });
+function updateHUDContextStyle() {
+    const iconWrapper = document.querySelector('.hud-icon');
+    if (!iconWrapper) return;
+
+    let colorVar = 'var(--accent)';
+    let bgPulse = false;
+    const statusLabel = document.getElementById('statusLabel');
+    const isDisconnected = statusLabel ? statusLabel.textContent.includes('Disconnected') : false;
+
+    if (learnPhase > 0) {
+        colorVar = 'var(--system-red)';
+        bgPulse = true;
+    } else if (isDisconnected) {
+        colorVar = 'var(--system-yellow)';
+    }
+
+    // Apply color and glow
+    iconWrapper.style.backgroundColor = `color-mix(in srgb, ${colorVar} 20%, transparent)`;
+    if (bgPulse) {
+        iconWrapper.classList.add('hud-pulse');
+        iconWrapper.style.boxShadow = `0 0 16px ${colorVar}`;
+    } else {
+        iconWrapper.classList.remove('hud-pulse');
+        iconWrapper.style.boxShadow = 'none';
+    }
+}
