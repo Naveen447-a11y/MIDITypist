@@ -84,6 +84,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x86\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PreBuildEvent>
+      <Command>taskkill /F /IM "MIDI Mapper.exe" /T 2&gt;nul || set ERRORLEVEL=0</Command>
+      <Message>Closing running instances of MIDI Mapper to release file locks...</Message>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
     </PostBuildEvent>
@@ -104,6 +108,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x86\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PreBuildEvent>
+      <Command>taskkill /F /IM "MIDI Mapper.exe" /T 2&gt;nul || set ERRORLEVEL=0</Command>
+      <Message>Closing running instances of MIDI Mapper to release file locks...</Message>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
     </PostBuildEvent>
@@ -122,6 +130,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x64\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PreBuildEvent>
+      <Command>taskkill /F /IM "MIDI Mapper.exe" /T 2&gt;nul || set ERRORLEVEL=0</Command>
+      <Message>Closing running instances of MIDI Mapper to release file locks...</Message>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
     </PostBuildEvent>
@@ -142,6 +154,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);winmm.lib;$(ProjectDir)packages\Microsoft.Web.WebView2.1.0.3800.47\build\native\x64\WebView2LoaderStatic.lib</AdditionalDependencies>
     </Link>
+    <PreBuildEvent>
+      <Command>taskkill /F /IM "MIDI Mapper.exe" /T 2&gt;nul || set ERRORLEVEL=0</Command>
+      <Message>Closing running instances of MIDI Mapper to release file locks...</Message>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>xcopy /Y /I /E "$(ProjectDir)src\ui\*" "$(OutDir)ui\"</Command>
     </PostBuildEvent>
