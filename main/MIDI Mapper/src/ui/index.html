@@ -94,18 +94,18 @@
 <body>
 
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" style="-webkit-app-region: drag;">
     <div class="brand"
-      style="display:flex; align-items:center; gap:16px; margin-bottom:48px; padding:0 12px; -webkit-app-region: no-drag;">
-      <div class="logo-box" style="width:40px; height:40px; display:flex; align-items:center; justify-content:center;">
-        <img src="app_icon.ico" style="width:32px; height:32px; border-radius:4px; object-fit:contain;">
+      style="display:flex; flex-direction:column; align-items:flex-start; margin-bottom:40px; padding:0 12px;">
+      <div class="logo-box"
+        style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+        <img src="app_icon.ico" style="width:32px; height:32px; object-fit:contain;">
       </div>
-      <h1
-        style="font-size:20px; font-weight:800; letter-spacing:-0.5px; background:linear-gradient(to bottom, #FFF, #AAA); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">
+      <h1 style="font-size:18px; font-weight:700; color:var(--text-primary); letter-spacing:-0.2px;">
         MIDITYPIST</h1>
     </div>
 
-    <nav style="display:flex; flex-direction:column; gap:8px; flex:1;">
+    <nav style="display:flex; flex-direction:column; gap:8px; flex:1; -webkit-app-region: no-drag;">
       <div class="nav-item active" onclick="setView('mappings')">
         <svg class="icon-box" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
           stroke-width="2.5">
@@ -126,7 +126,7 @@
         </svg>
         Activity Log
       </div>
-      <div class="nav-item" onclick="setView('settings')">
+      <div class="nav-item" onclick="openSettings()">
         <svg class="icon-box" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
           stroke-width="2.5">
           <circle cx="12" cy="12" r="3"></circle>
@@ -134,68 +134,95 @@
             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
           </path>
         </svg>
-        Settings
+        Preferences
       </div>
     </nav>
-
-    <div style="padding:12px; display:flex; flex-direction:column; gap:12px;">
-      <button class="btn btn-secondary" style="width:100%; justify-content:flex-start; height:44px;"
-        onclick="toggleTheme()">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"
-          style="margin-right:12px;">
-          <circle cx="12" cy="12" r="5"></circle>
-          <line x1="12" y1="1" x2="12" y2="3"></line>
-          <line x1="12" y1="21" x2="12" y2="23"></line>
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-          <line x1="1" y1="12" x2="3" y2="12"></line>
-          <line x1="21" y1="12" x2="23" y2="12"></line>
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-        </svg>
-        Interface Appearance
-      </button>
-      <div id="statusIndicator" class="card"
-        style="padding:12px; display:flex; align-items:center; gap:12px; border-radius:var(--radius-md);">
-        <div id="statusDot"
-          style="width:8px; height:8px; border-radius:50%; background:var(--error); box-shadow:0 0 8px var(--error);">
-        </div>
-        <div style="flex:1;">
-          <div
-            style="font-size:10px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">
-            Engine Status</div>
-          <div id="statusLabel" style="font-size:12px; font-weight:600;">Disconnected</div>
-        </div>
-      </div>
-    </div>
+    <button class="btn btn-secondary"
+      style="width:100%; justify-content:flex-start; height:44px; margin-bottom: 12px; -webkit-app-region: no-drag;"
+      onclick="toggleTheme()">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"
+        style="margin-right:12px;">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
   </aside>
 
   <!-- Main View -->
   <main class="main-view">
-    <!-- Stylized Context HUD -->
+    <!-- Dynamic Island HUD -->
     <header
-      style="height:80px; display:flex; align-items:center; justify-content:space-between; padding:0 40px; border-bottom:1px solid var(--border);">
-      <div id="activeContext" class="hud-box" style="display:flex; align-items:center; gap:16px;">
-        <div class="hud-icon"
-          style="width:48px; height:48px; background:var(--bg-input); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
-          <img src="app_icon.ico" style="width:32px; height:32px; object-fit:contain;">
-        </div>
-        <div>
-          <div
-            style="font-size:10px; color:var(--text-tertiary); text-transform:uppercase; font-weight:800; letter-spacing:1px;">
-            Active Context</div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span id="contextApp" style="font-size:16px; font-weight:700; color:var(--text-primary);">System Idle</span>
-            <span style="color:var(--text-tertiary);">|</span>
-            <span id="contextTitle"
-              style="font-size:14px; font-weight:500; color:var(--text-secondary); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Waiting
-              for interaction...</span>
+      style="-webkit-app-region: drag; justify-content: space-between !important; padding: 16px 20px 12px 20px !important;">
+
+      <!-- Spacer for perfect centering -->
+      <div style="flex: 1; min-width: 60px;"></div>
+
+      <div class="hud-island" id="hudIsland" style="flex-shrink: 1; min-width: 0; margin: 0 16px;">
+
+        <!-- MIDI Status Module (Hides on very small screens) -->
+        <div class="midi-status"
+          style="display:flex; align-items:center; gap:8px; padding-right:12px; border-right:1px solid rgba(255,255,255,0.1); flex-shrink: 0;">
+          <div id="statusDot"
+            style="width:8px; height:8px; border-radius:50%; background:var(--error); box-shadow:0 0 8px var(--error); transition:all 0.3s ease;">
+          </div>
+          <div style="display:flex; flex-direction:column; overflow: hidden;">
+            <span
+              style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px; white-space: nowrap;">MIDI
+              Engine</span>
+            <span id="statusLabel"
+              style="font-size:12px; font-weight:600; color:var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Disconnected</span>
           </div>
         </div>
+
+        <!-- Active Context Module -->
+        <div id="activeContext"
+          style="display:flex; align-items:center; gap:14px; padding-left:4px; flex: 1; min-width: 0; max-width: 250px;"
+          class="context-container">
+          <div class="hud-icon"
+            style="width:32px; height:32px; flex-shrink:0; background:rgba(255,255,255,0.1); border-radius:8px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+            <img src="app_icon.ico" style="width:20px; height:20px; object-fit:contain;">
+          </div>
+          <div class="context-content" style="flex: 1; min-width: 0;">
+            <div
+              style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px; margin-bottom:1px; white-space: nowrap;">
+              Active Context</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span id="contextApp"
+                style="font-size:13px; font-weight:600; color:var(--accent); flex-shrink: 0; white-space: nowrap;">System
+                Idle</span>
+              <span style="color:rgba(255,255,255,0.2); flex-shrink: 0;">•</span>
+              <span id="contextTitle"
+                style="font-size:12px; font-weight:400; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex: 1; min-width: 0;">Waiting...</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"
+          style="width:1px; height:24px; background:rgba(255,255,255,0.1); margin: 0 4px; flex-shrink: 0;"></div>
+
+        <div style="display:flex; gap:6px; flex-shrink: 0; align-items: center; -webkit-app-region: no-drag;">
+          <button class="btn btn-primary" style="padding: 6px 12px; white-space: nowrap;" onclick="startLearn()">Capture
+            Mapping</button>
+          <button class="btn btn-secondary action-manual" style="padding: 6px 12px; white-space: nowrap;"
+            onclick="addMapping()">Manual Entry</button>
+        </div>
       </div>
-      <div style="display:flex; gap:12px;">
-        <button class="btn btn-primary" onclick="startLearn()">Capture Mapping</button>
-        <button class="btn btn-secondary" onclick="addMapping()">Manual Entry</button>
+
+      <!-- Windows Native Controls (Right Aligned) -->
+      <div style="flex: 1; min-width: 60px; display: flex; justify-content: flex-end; align-items: flex-start;">
+        <div class="traffic-lights"
+          style="position: static; margin-top: 4px; display: flex; gap: 8px; -webkit-app-region: no-drag;">
+          <div class="dot yellow" onclick="send('minimize_window')"></div>
+          <div class="dot green" onclick="send('maximize_window')"></div>
+          <div class="dot red" onclick="send('close_window')"></div>
+        </div>
       </div>
     </header>
 
@@ -206,8 +233,8 @@
       <div id="view-mappings" class="view-section active">
         <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:32px;">
           <div>
-            <h2 style="font-size:32px; font-weight:800; letter-spacing:-1px;">My Workspace</h2>
-            <p style="color:var(--text-tertiary); font-size:14px; font-weight:500;">Manage your MIDI-to-Keyboard
+            <h2 style="font-size:28px; font-weight:700; letter-spacing:-0.5px;">My Workspace</h2>
+            <p style="color:var(--text-tertiary); font-size:13px; font-weight:500;">Manage your MIDI-to-Keyboard
               automation profiles</p>
           </div>
           <div style="display:flex; gap:12px;">
@@ -238,8 +265,8 @@
 
       <!-- Logs View -->
       <div id="view-logs" class="view-section">
-        <h2 style="font-size:32px; font-weight:800; letter-spacing:-1px; margin-bottom:8px;">Activity Stream</h2>
-        <p style="color:var(--text-tertiary); font-size:14px; margin-bottom:32px;">Real-time diagnostics and MIDI signal
+        <h2 style="font-size:28px; font-weight:700; letter-spacing:-0.5px; margin-bottom:6px;">Activity Stream</h2>
+        <p style="color:var(--text-tertiary); font-size:13px; margin-bottom:32px;">Real-time diagnostics and MIDI signal
           monitoring</p>
         <div class="card"
           style="flex:1; overflow:hidden; display:flex; flex-direction:column; padding:0; background:rgba(0,0,0,0.2);">
@@ -257,88 +284,9 @@
         </div>
       </div>
 
-      <!-- Settings View -->
-      <div id="view-settings" class="view-section">
-        <h2 style="font-size:32px; font-weight:800; letter-spacing:-1px; margin-bottom:8px;">Preferences</h2>
-        <p style="color:var(--text-tertiary); font-size:14px; margin-bottom:32px;">Configure core engine behavior and
-          third-party integrations</p>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:32px;">
-          <div class="card" style="padding:28px;">
-            <div style="display:flex; align-items:center; gap:12px; margin-bottom:24px;">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--accent)" stroke-width="2.5">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-              </svg>
-              <h3 style="font-size:18px; font-weight:700;">AI Intelligence</h3>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:20px;">
-              <div class="input-group">
-                <label
-                  style="display:block; font-size:12px; font-weight:800; color:var(--text-tertiary); text-transform:uppercase; margin-bottom:8px;">Gemini
-                  Flash API Key</label>
-                <input id="inputApiKey" type="password" style="width:100%; border-radius:10px;">
-              </div>
-              <div class="input-group">
-                <label
-                  style="display:block; font-size:12px; font-weight:800; color:var(--text-tertiary); text-transform:uppercase; margin-bottom:8px;">Prompt
-                  Architecture</label>
-                <textarea id="inputAiGlobal" style="width:100%; height:120px; border-radius:10px;"></textarea>
-                <p style="font-size:11px; color:var(--text-tertiary); margin-top:8px;">Use {prompt} to inject secondary
-                  triggers</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="card" style="padding:28px;">
-            <div style="display:flex; align-items:center; gap:12px; margin-bottom:24px;">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--accent)" stroke-width="2.5">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-              </svg>
-              <h3 style="font-size:18px; font-weight:700;">Engine Controller</h3>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <label
-                style="display:block; font-size:12px; font-weight:800; color:var(--text-tertiary); text-transform:uppercase;">Primary
-                Input Device</label>
-              <div style="display:flex; gap:12px;">
-                <select id="selectMidiPort" style="flex:1; border-radius:10px;"></select>
-                <button class="btn btn-primary" onclick="toggleConnect()" id="btnConnect"
-                  style="min-width:120px;">Connect</button>
-              </div>
-
-              <div style="margin-top:16px; display:flex; flex-direction:column; gap:12px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:14px; font-weight:600;">Hardware Auto-Reconnect</span>
-                  <label class="toggle"><input type="checkbox" id="checkReconnect" onchange="updateSettings()">
-                    <div class="toggle-slider"></div>
-                  </label>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:14px; font-weight:600;">Dynamic App Switching</span>
-                  <label class="toggle"><input type="checkbox" id="checkAppSwitch" onchange="updateSettings()">
-                    <div class="toggle-slider"></div>
-                  </label>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:14px; font-weight:600;">Velocity Sensitive Zones</span>
-                  <label class="toggle"><input type="checkbox" id="checkVelocity" onchange="updateSettings()">
-                    <div class="toggle-slider"></div>
-                  </label>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:14px; font-weight:600;">Silent Tray Resident</span>
-                  <label class="toggle"><input type="checkbox" id="checkTray" onchange="updateSettings()">
-                    <div class="toggle-slider"></div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Global Piano Dashboard -->
       <footer id="pianoDashboard"
-        style="height:120px; border-top:1px solid var(--border); background:rgba(0,0,0,0.4); backdrop-filter:blur(20px); display:flex; padding:10px 40px; align-items:center; gap:4px; overflow:hidden;">
+        style="height:120px; border-top:1px solid var(--border); box-shadow: 0 -1px 0 rgba(255,255,255,0.03); background:rgba(0,0,0,0.4); backdrop-filter:blur(20px); display:flex; padding:10px 40px; align-items:center; gap:4px; overflow:hidden;">
         <!-- 128 keys will be injected here via app.js -->
       </footer>
     </div>
@@ -423,6 +371,90 @@
         <div style="display:flex; gap:12px; margin-top:24px;">
           <button class="btn btn-primary" style="flex:1;" onclick="saveEdit()">Apply Changes</button>
           <button class="btn btn-secondary" style="flex:1;" onclick="closeEditor()">Discard</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preferences Modal -->
+  <div id="modalSettings"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(24px); z-index:1000; align-items:center; justify-content:center; animation:fadeIn 0.2s ease;">
+    <div class="card"
+      style="width:700px; padding:32px; background:var(--bg-main); border-radius:var(--radius-xl); box-shadow:0 24px 64px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+        <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.5px;">Preferences</h2>
+        <button class="btn btn-secondary" style="padding:4px 8px; border-radius:50%;" onclick="closeSettings()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:32px;">
+        <div style="display:flex; flex-direction:column; gap:20px;">
+          <h3
+            style="font-size:14px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">
+            Engine Controller</h3>
+
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <label style="display:block; font-size:12px; font-weight:600; color:var(--text-tertiary);">Primary Input
+              Device</label>
+            <div style="display:flex; gap:12px;">
+              <select id="selectMidiPort" style="flex:1; border-radius:8px;"></select>
+              <button class="btn btn-primary" onclick="toggleConnect()" id="btnConnect"
+                style="min-width:100px;">Connect</button>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:16px; margin-top:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:14px; font-weight:500;">Hardware Auto-Reconnect</span>
+              <label class="toggle"><input type="checkbox" id="checkReconnect" onchange="updateSettings()">
+                <div class="toggle-slider"></div>
+              </label>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:14px; font-weight:500;">Dynamic App Switching</span>
+              <label class="toggle"><input type="checkbox" id="checkAppSwitch" onchange="updateSettings()">
+                <div class="toggle-slider"></div>
+              </label>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:14px; font-weight:500;">Velocity Sensitive Zones</span>
+              <label class="toggle"><input type="checkbox" id="checkVelocity" onchange="updateSettings()">
+                <div class="toggle-slider"></div>
+              </label>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:14px; font-weight:500;">Silent Tray Resident</span>
+              <label class="toggle"><input type="checkbox" id="checkTray" onchange="updateSettings()">
+                <div class="toggle-slider"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:20px;">
+          <h3
+            style="font-size:14px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">
+            AI Intelligence</h3>
+
+          <div class="input-group">
+            <label
+              style="display:block; font-size:12px; font-weight:600; color:var(--text-tertiary); margin-bottom:8px;">Gemini
+              Flash API Key</label>
+            <input id="inputApiKey" type="password" style="width:100%; border-radius:8px;">
+          </div>
+
+          <div class="input-group">
+            <label
+              style="display:block; font-size:12px; font-weight:600; color:var(--text-tertiary); margin-bottom:8px;">Global
+              Instruction</label>
+            <textarea id="inputAiGlobal" style="width:100%; height:140px; border-radius:8px;"></textarea>
+            <p style="font-size:11px; color:var(--text-tertiary); margin-top:8px;">Use {prompt} to inject dynamic AI
+              triggers.</p>
+          </div>
         </div>
       </div>
     </div>

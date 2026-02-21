@@ -1,4 +1,5 @@
 ﻿#include <windows.h>
+#include <windowsx.h>
 #include <CommCtrl.h>
 #include <Psapi.h>
 #include <shellapi.h>
@@ -1158,6 +1159,21 @@ void HandleWebMessage(const std::string& messageStr) {
             L"(C) 2026",
             L"About MIDITypist", MB_OK | MB_ICONINFORMATION);
     }
+    else if (action == "minimize_window") {
+        ShowWindow(g_hwndMain, SW_MINIMIZE);
+    }
+    else if (action == "maximize_window") {
+        if (IsZoomed(g_hwndMain)) ShowWindow(g_hwndMain, SW_RESTORE);
+        else ShowWindow(g_hwndMain, SW_MAXIMIZE);
+    }
+    else if (action == "close_window") {
+        PostMessage(g_hwndMain, WM_CLOSE, 0, 0);
+    }
+    else if (action == "drag_window") {
+        // Native trick to seamlessly start dragging a borderless window
+        ReleaseCapture();
+        SendMessage(g_hwndMain, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
 }
 
 // ══════════════════════════════════════════
@@ -1173,6 +1189,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SetTimer(hwnd, PIANO_DECAY_TIMER, PIANO_DECAY_MS, NULL);
         AddTrayIcon(hwnd);
         break;
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+        HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfo(hMonitor, &mi)) {
+            mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left;
+            mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
+            mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
+            mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
+        }
+        
+        // Prevent window from becoming too small
+        UINT dpi = GetDpiForWindow(hwnd);
+        int minWidth = MulDiv(750, dpi, 96);
+        int minHeight = MulDiv(450, dpi, 96);
+        mmi->ptMinTrackSize.x = minWidth;
+        mmi->ptMinTrackSize.y = minHeight;
+        
+        return 0;
+    }
     case WM_SIZE:
         if (g_controller) {
             RECT rc;
@@ -1325,6 +1361,28 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         g_controller = nullptr;
         PostQuitMessage(0);
         return 0;
+    case WM_NCHITTEST: {
+        // Allow resizing across the borderless window edges
+        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
+        if (hit == HTCLIENT) {
+            POINT pt;
+            pt.x = GET_X_LPARAM(lParam);
+            pt.y = GET_Y_LPARAM(lParam);
+            ScreenToClient(hwnd, &pt);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            int border = 8;
+            if (pt.y < border && pt.x < border) return HTTOPLEFT;
+            if (pt.y < border && pt.x >= rc.right - border) return HTTOPRIGHT;
+            if (pt.y >= rc.bottom - border && pt.x < border) return HTBOTTOMLEFT;
+            if (pt.y >= rc.bottom - border && pt.x >= rc.right - border) return HTBOTTOMRIGHT;
+            if (pt.y < border) return HTTOP;
+            if (pt.y >= rc.bottom - border) return HTBOTTOM;
+            if (pt.x < border) return HTLEFT;
+            if (pt.x >= rc.right - border) return HTRIGHT;
+        }
+        return hit;
+    }
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
@@ -1371,10 +1429,22 @@ void InitWebView2(HWND hwnd) {
                 env->CreateCoreWebView2Controller(hwnd,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [hwnd, uiPath](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
-                            if (FAILED(result) || !controller) return result;
-
                             g_controller = controller;
                             controller->get_CoreWebView2(&g_webview);
+
+                            // Setup Draggable Regions
+                            wil::com_ptr<ICoreWebView2CompositionController> compController;
+                            if (SUCCEEDED(controller->QueryInterface(IID_PPV_ARGS(&compController)))) {
+                                // For composition, handling drag is more complex, but standard controllers
+                                // handle -webkit-app-region automatically if enabled in settings in newer WebView2.
+                            }
+
+                            wil::com_ptr<ICoreWebView2_2> webview2_2;
+                            if (SUCCEEDED(g_webview->QueryInterface(IID_PPV_ARGS(&webview2_2)))) {
+                                // WebView2 automatically handles -webkit-app-region: drag 
+                                // and returns HTCAPTION for NCHITTEST messages if properly configured.
+                                // We just need to make sure we don't swallow it.
+                            }
 
                             // Settings
                             wil::com_ptr<ICoreWebView2Settings> settings;
@@ -1450,19 +1520,25 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     wc.hInstance = hInstance;
     wc.lpszClassName = CLASS_NAME;
     wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    wc.hbrBackground = CreateSolidBrush(RGB(28, 28, 30));
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     RegisterClass(&wc);
 
     HWND hwnd = CreateWindowEx(0, CLASS_NAME, L"MIDITypist",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1140, 640,
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU, 
+        CW_USEDEFAULT, CW_USEDEFAULT, 1140, 640,
         nullptr, nullptr, hInstance, nullptr);
 
     // Apply dark mode & Mica backdrop
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-    int mica = 2;
-    DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, &mica, sizeof(mica));
+    
+    // Windows 11 Mica (Fallbacks for different OS versions)
+    int micaVal = 1;
+    DwmSetWindowAttribute(hwnd, 1029 /*DWMWA_MICA_EFFECT*/, &micaVal, sizeof(micaVal));
+    int backdrop = 2; // DWMSBT_MAINWINDOW
+    DwmSetWindowAttribute(hwnd, 38 /*DWMWA_SYSTEMBACKDROP_TYPE*/, &backdrop, sizeof(backdrop));
+
     MARGINS margins = { -1 };
     DwmExtendFrameIntoClientArea(hwnd, &margins);
 
