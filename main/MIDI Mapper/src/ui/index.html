@@ -166,18 +166,31 @@
 
       <div class="hud-island" id="hudIsland" style="flex-shrink: 1; min-width: 0; margin: 0 16px;">
 
-        <!-- MIDI Status Module (Hides on very small screens) -->
+        <!-- MIDI Status Module -->
         <div class="midi-status"
-          style="display:flex; align-items:center; gap:8px; padding-right:12px; border-right:1px solid rgba(255,255,255,0.1); flex-shrink: 0;">
-          <div id="statusDot"
-            style="width:8px; height:8px; border-radius:50%; background:var(--error); box-shadow:0 0 8px var(--error); transition:all 0.3s ease;">
-          </div>
-          <div style="display:flex; flex-direction:column; overflow: hidden;">
+          style="display:flex; flex-direction:column; min-width:180px; border-right:1px solid rgba(255,255,255,0.1); padding-right:12px; flex-shrink: 0; -webkit-app-region: no-drag;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <span
-              style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px; white-space: nowrap;">MIDI
+              style="font-size:9px; color:var(--text-tertiary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">MIDI
               Engine</span>
-            <span id="statusLabel"
-              style="font-size:12px; font-weight:600; color:var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Disconnected</span>
+            <div id="statusDot"
+              style="width:6px; height:6px; border-radius:50%; background:var(--error); box-shadow:0 0 8px var(--error); transition:all 0.3s ease;">
+            </div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="hudMidiPort"
+              style="flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-primary); font-size:11px; font-weight:500; border-radius:6px; padding:3px 6px; outline:none; cursor:pointer;">
+              <option disabled selected>No Devices</option>
+            </select>
+            <button id="hudBtnConnect" class="btn-icon"
+              style="padding:4px; background:rgba(255,255,255,0.05); border-radius:6px; border:1px solid rgba(255,255,255,0.1); color:var(--text-secondary); transition:all 0.2s;"
+              onclick="toggleConnect()" title="Toggle Connection">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+              </svg>
+            </button>
           </div>
         </div>
 

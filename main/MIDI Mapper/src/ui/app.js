@@ -257,27 +257,55 @@ function updateContext(app, title) {
 }
 
 function setStatus(text) {
-    const label = document.getElementById('statusLabel');
     const dot = document.getElementById('statusDot');
-    const btn = document.getElementById('btnConnect');
+    const hudBtn = document.getElementById('hudBtnConnect');
+    const mainBtn = document.getElementById('btnConnect');
 
-    if (label) label.textContent = text;
-    if (dot) dot.style.background = (text.includes('Connected') || text.includes('Ready')) ? 'var(--success)' : 'var(--error)';
-    if (btn) btn.textContent = text.includes('Connected') ? 'Disconnect' : 'Connect';
+    const connected = text.includes('Connected') || text.includes('Ready');
+
+    if (dot) {
+        dot.style.background = connected ? 'var(--success)' : 'var(--error)';
+        dot.style.boxShadow = connected ? '0 0 8px var(--success)' : '0 0 8px var(--error)';
+    }
+
+    if (hudBtn) {
+        hudBtn.style.color = connected ? 'var(--success)' : 'var(--text-secondary)';
+        hudBtn.style.background = connected ? 'color-mix(in srgb, var(--success) 20%, transparent)' : 'rgba(255,255,255,0.05)';
+        hudBtn.classList.toggle('active', connected);
+    }
+
+    if (mainBtn) mainBtn.textContent = connected ? 'Disconnect' : 'Connect';
+
+    addLog(`System Status: ${text}`, connected ? 'mapping' : 'system');
     updateHUDContextStyle();
 }
 
 function updatePorts(ports, selectedIdx) {
     const sel = document.getElementById('selectMidiPort');
-    if (!sel) return;
-    sel.innerHTML = '';
-    ports.forEach((p, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = p;
-        if (i === selectedIdx) opt.selected = true;
-        sel.appendChild(opt);
-    });
+    const hudSel = document.getElementById('hudMidiPort');
+    if (!sel || !hudSel) return;
+
+    const populate = (el) => {
+        el.innerHTML = '';
+        if (ports.length === 0) {
+            const opt = document.createElement('option');
+            opt.disabled = true;
+            opt.selected = true;
+            opt.textContent = 'No Devices';
+            el.appendChild(opt);
+            return;
+        }
+        ports.forEach((p, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = p;
+            if (i === selectedIdx) opt.selected = true;
+            el.appendChild(opt);
+        });
+    };
+
+    populate(sel);
+    populate(hudSel);
 }
 
 function syncConfig(cfg) {
@@ -386,8 +414,16 @@ function loadProfile() { send('load_profile'); }
 function saveProfile() { send('save_profile'); }
 function clearLog() { const log = document.getElementById('logBody'); if (log) log.innerHTML = ''; }
 function toggleConnect() {
-    const portEl = document.getElementById('selectMidiPort');
-    if (!portEl) return;
+    const hudPort = document.getElementById('hudMidiPort');
+    const mainPort = document.getElementById('selectMidiPort');
+
+    // Choose whichever is available, prioritizing HUD for quick actions
+    const portEl = hudPort || mainPort;
+    if (!portEl || portEl.value === "" || isNaN(parseInt(portEl.value))) {
+        addLog("Please select a MIDI device first.", "error");
+        return;
+    }
+
     const port = parseInt(portEl.value);
     send('toggle_connect', { port });
 }
@@ -492,6 +528,17 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initPiano();
     send('init');
+
+    // Sync HUD and Settings port selectors
+    document.addEventListener('change', e => {
+        if (e.target.id === 'hudMidiPort') {
+            const sel = document.getElementById('selectMidiPort');
+            if (sel) sel.value = e.target.value;
+        } else if (e.target.id === 'selectMidiPort') {
+            const hudSel = document.getElementById('hudMidiPort');
+            if (hudSel) hudSel.value = e.target.value;
+        }
+    });
 });
 function updateHUDContextStyle() {
     const iconWrapper = document.querySelector('.hud-icon');

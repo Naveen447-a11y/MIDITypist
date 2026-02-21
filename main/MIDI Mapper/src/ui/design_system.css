@@ -570,7 +570,11 @@ input[type="checkbox"] {
   }
 
   .midi-status {
-    display: none !important;
+    min-width: 140px !important;
+  }
+
+  #hudMidiPort {
+    display: none;
   }
 
   .divider {
@@ -582,6 +586,46 @@ input[type="checkbox"] {
   }
 
   #contextTitle {
-    max-width: 100px !important;
+    max-width: 80px !important;
+  }
+}
+
+/* --- HUD MIDI Controls --- */
+#hudMidiPort {
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px !important;
+}
+
+#hudMidiPort:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+#hudBtnConnect:hover {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  color: #fff !important;
+  transform: scale(1.05);
+}
+
+#hudBtnConnect.active {
+  color: var(--system-green) !important;
+  animation: pulse-success-border 2s infinite;
+}
+
+@keyframes pulse-success-border {
+  0% {
+    border-color: rgba(40, 200, 64, 0.4);
+  }
+
+  70% {
+    border-color: rgba(40, 200, 64, 0);
+  }
+
+  100% {
+    border-color: rgba(40, 200, 64, 0);
   }
 }
