@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <atomic>
 #include <memory>
 #include <algorithm>
 #include <functional>
@@ -132,7 +133,7 @@ std::wstring g_lastProfilePath;
 
 // ── Piano Roll State ──
 int g_pianoVelocity[PIANO_TOTAL_KEYS] = { 0 };
-bool g_pianoPhysicalDown[PIANO_TOTAL_KEYS] = { false };
+std::atomic<bool> g_pianoPhysicalDown[PIANO_TOTAL_KEYS] = {};
 int g_pianoCC[128] = { 0 };
 bool g_sustainActive = false;
 std::set<int> g_sustainedVKs;
@@ -164,10 +165,12 @@ std::map<int, bool> g_ccHoldActive;
 HHOOK g_hKeyboardHook = NULL;
 
 // ── Performance Flags ──
-bool g_chordsEnabled = false;
+std::atomic<bool> g_chordsEnabled{false};
 std::set<int> g_gestureNotes; // Notes that actually have gesture mappings
+std::mutex g_gestureNotesMutex;
 DWORD g_lastUiPushTime = 0;
 const DWORD UI_THROTTLE_MS = 16; // ~60fps for UI updates
+const std::string APP_VERSION = "1.1";
 
 
 // ── Forward Declarations ──
@@ -285,8 +288,11 @@ void SendMappingsToUI() {
         arr.push_back(item);
     }
 
-    g_chordsEnabled = hasChords;
-    g_gestureNotes = gestureNotes;
+    g_chordsEnabled.store(hasChords, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
+        g_gestureNotes = gestureNotes;
+    }
     PostToWebView({ {"type", "mappings"}, {"mappings", arr} });
 }
 
@@ -412,9 +418,18 @@ void SaveMappings(const std::wstring& filename) {
 
 void LoadMappings(const std::wstring& filename) {
     std::ifstream f(filename);
-    if (!f) return;
+    if (!f) {
+        SendLog("Failed to open profile: file not found.", "error");
+        return;
+    }
     json j;
-    try { f >> j; } catch (...) { return; }
+    try { f >> j; } catch (const std::exception& e) {
+        SendLog(std::string("Profile load error: ") + e.what(), "error");
+        return;
+    } catch (...) {
+        SendLog("Profile load error: unknown format.", "error");
+        return;
+    }
     {
         std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
         g_mappings.clear();
@@ -465,6 +480,7 @@ void SaveConfig() {
     cfg["ai_global_prompt"] = g_aiGlobalPrompt;
     cfg["velocity_zones_enabled"] = g_velocityZonesEnabled;
     cfg["minimize_to_tray_enabled"] = g_minimizeToTrayEnabled;
+    cfg["config_version"] = APP_VERSION;
     std::ofstream f(g_configPath);
     if (f) f << cfg.dump(4);
 }
@@ -563,8 +579,8 @@ void midiCallback(double, std::vector<unsigned char>* msg, void*) {
     }
 
     // Track physical state
-    if (isNoteOn) g_pianoPhysicalDown[number] = true;
-    if (isNoteOff) g_pianoPhysicalDown[number] = false;
+    if (isNoteOn) g_pianoPhysicalDown[number].store(true, std::memory_order_relaxed);
+    if (isNoteOff) g_pianoPhysicalDown[number].store(false, std::memory_order_relaxed);
 
     // CC immediately if not learning
     if (isCC) {
@@ -573,7 +589,7 @@ void midiCallback(double, std::vector<unsigned char>* msg, void*) {
     
     // Chord grouping logic or Instant Trigger
     if (isNoteOn) {
-        if (g_chordsEnabled) {
+        if (g_chordsEnabled.load(std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lock(g_chordMutex);
             g_chordBuffer.push_back(number);
             PostMessage(g_hwndMain, WM_CHORD_SIGNAL, 0, 0);
@@ -657,7 +673,12 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
         }
         
         // Gesture Logic (Only if needed for this note)
-        if (g_gestureNotes.count(number)) {
+        bool hasGesture = false;
+        {
+            std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
+            hasGesture = g_gestureNotes.count(number) > 0;
+        }
+        if (hasGesture) {
             std::lock_guard<std::mutex> lock(g_gestureMutex);
             auto& state = g_keyStates[number];
             DWORD pressTime = GetTickCount();
@@ -681,7 +702,12 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
             g_lastUiPushTime = now;
         }
         
-        if (g_gestureNotes.count(number)) {
+        bool hasGestureOff = false;
+        {
+            std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
+            hasGestureOff = g_gestureNotes.count(number) > 0;
+        }
+        if (hasGestureOff) {
             std::lock_guard<std::mutex> lock(g_gestureMutex);
             auto& state = g_keyStates[number];
             DWORD duration = GetTickCount() - state.lastPressTime;
@@ -748,7 +774,7 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
         // Note-to-Key Mapping
         if (m.midi_type == 0 && number == m.midi_num && m.gesture_id == 0) {
             if (isNoteOn) {
-                if (!g_pianoPhysicalDown[number]) continue; // Rapid tap safety
+                if (!g_pianoPhysicalDown[number].load(std::memory_order_relaxed)) continue; // Rapid tap safety
                 if (velocity < m.vel_min) continue;
                 if (g_velocityZonesEnabled) {
                     if (m.vel_zone == 1 && velocity > 63) continue;
@@ -1188,12 +1214,12 @@ void HandleWebMessage(const std::string& messageStr) {
     }
     else if (action == "show_about") {
         MessageBox(g_hwndMain,
-            L"MIDITypist v1.0\n"
+            L"MIDITypist v1.1\n"
             L"Modern MIDI-to-Keyboard Mapper\n\n"
             L"Features:\n"
             L"\x2022 Hybrid WebView2 Architecture\n"
             L"\x2022 Premium Glassmorphism UI\n"
-            L"\x2022 Low-latency C++ MIDI Engine\n\n"
+            L"\x2022 Zero-latency C++ MIDI Engine\n\n"
             L"(C) 2026",
             L"About MIDITypist", MB_OK | MB_ICONINFORMATION);
     }
