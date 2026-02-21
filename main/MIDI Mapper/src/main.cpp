@@ -163,6 +163,13 @@ std::map<int, bool> g_ccHoldActive;
 // ── Hook State ──
 HHOOK g_hKeyboardHook = NULL;
 
+// ── Performance Flags ──
+bool g_chordsEnabled = false;
+std::set<int> g_gestureNotes; // Notes that actually have gesture mappings
+DWORD g_lastUiPushTime = 0;
+const DWORD UI_THROTTLE_MS = 16; // ~60fps for UI updates
+
+
 // ── Forward Declarations ──
 void SendMappingsToUI();
 void ResolveGesture(int midi_num, int gesture_id);
@@ -241,8 +248,17 @@ void SendStatus(const std::string& text) {
 
 void SendMappingsToUI() {
     json arr = json::array();
-    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-    for (const auto& m : g_mappings) {
+    
+    // Performance optimization: Check if chords or gestures are needed
+    bool hasChords = false;
+    std::set<int> gestureNotes;
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+        for (const auto& m : g_mappings) {
+            if (m.midi_type == 2) hasChords = true;
+            if (m.gesture_id > 0) gestureNotes.insert(m.midi_num);
+
         std::wstring targetDisplay;
         if (m.profile_switch >= 0) {
             targetDisplay = L"[Profile #" + std::to_wstring(m.profile_switch) + L"]";
@@ -269,6 +285,9 @@ void SendMappingsToUI() {
         if (m.midi_type == 2) item["midi_chord"] = m.midi_chord;
         arr.push_back(item);
     }
+
+    g_chordsEnabled = hasChords;
+    g_gestureNotes = gestureNotes;
     PostToWebView({ {"type", "mappings"}, {"mappings", arr} });
 }
 
@@ -553,12 +572,16 @@ void midiCallback(double, std::vector<unsigned char>* msg, void*) {
         ProcessMIDIEvent(status & 0xF0, number, velocity);
     }
     
-    // Chord grouping logic for Note On
+    // Chord grouping logic or Instant Trigger
     if (isNoteOn) {
-        std::lock_guard<std::mutex> lock(g_chordMutex);
-        g_chordBuffer.push_back(number);
-        // Signal main thread to reset/start the chord timer
-        PostMessage(g_hwndMain, WM_CHORD_SIGNAL, 0, 0);
+        if (g_chordsEnabled) {
+            std::lock_guard<std::mutex> lock(g_chordMutex);
+            g_chordBuffer.push_back(number);
+            PostMessage(g_hwndMain, WM_CHORD_SIGNAL, 0, 0);
+        } else {
+            // Bypass chord detection for zero-latency
+            ProcessMIDIEvent(0x90, number, velocity);
+        }
     }
     
     // Process Note Off immediately
@@ -626,34 +649,50 @@ void ProcessMIDIEvent(int type, int number, int velocity) {
     // Update Piano Roll and Gesture state
     if (isNoteOn && number >= 0 && number < 128) {
         g_pianoVelocity[number] = velocity;
-        PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", velocity} });
         
-        std::lock_guard<std::mutex> lock(g_gestureMutex);
-        auto& state = g_keyStates[number];
+        // UI Throttling
         DWORD now = GetTickCount();
-        if (now - state.lastPressTime < GESTURE_WINDOW_MS) {
-            state.tapCount++;
-        } else {
-            state.tapCount = 1;
-            SetTimer(g_hwndMain, GESTURE_TIMER_ID + number, GESTURE_WINDOW_MS, NULL);
+        if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
+            PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", velocity} });
+            g_lastUiPushTime = now;
         }
-        state.lastPressTime = now;
-        state.processingGesture = true;
-        state.holdTriggered = false;
+        
+        // Gesture Logic (Only if needed for this note)
+        if (g_gestureNotes.count(number)) {
+            std::lock_guard<std::mutex> lock(g_gestureMutex);
+            auto& state = g_keyStates[number];
+            DWORD pressTime = GetTickCount();
+            if (pressTime - state.lastPressTime < GESTURE_WINDOW_MS) {
+                state.tapCount++;
+            } else {
+                state.tapCount = 1;
+                SetTimer(g_hwndMain, GESTURE_TIMER_ID + number, GESTURE_WINDOW_MS, NULL);
+            }
+            state.lastPressTime = pressTime;
+            state.processingGesture = true;
+            state.holdTriggered = false;
+        }
     }
     else if (isNoteOff && number >= 0 && number < 128) {
         g_pianoVelocity[number] = 0;
-        PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", 0} });
         
-        std::lock_guard<std::mutex> lock(g_gestureMutex);
-        auto& state = g_keyStates[number];
-        DWORD duration = GetTickCount() - state.lastPressTime;
-        if (duration >= LONG_HOLD_MS && !state.holdTriggered) {
-            state.holdTriggered = true;
-            KillTimer(g_hwndMain, GESTURE_TIMER_ID + number);
-            state.tapCount = 0;
-            state.processingGesture = false;
-            ResolveGesture(number, 2); // Long Hold
+        DWORD now = GetTickCount();
+        if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
+            PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", 0} });
+            g_lastUiPushTime = now;
+        }
+        
+        if (g_gestureNotes.count(number)) {
+            std::lock_guard<std::mutex> lock(g_gestureMutex);
+            auto& state = g_keyStates[number];
+            DWORD duration = GetTickCount() - state.lastPressTime;
+            if (duration >= LONG_HOLD_MS && !state.holdTriggered) {
+                state.holdTriggered = true;
+                KillTimer(g_hwndMain, GESTURE_TIMER_ID + number);
+                state.tapCount = 0;
+                state.processingGesture = false;
+                ResolveGesture(number, 2); // Long Hold
+            }
         }
     }
 
