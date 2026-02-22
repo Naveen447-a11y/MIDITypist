@@ -1,76 +1,23 @@
-﻿#include <windows.h>
-#include <windowsx.h>
-#include <CommCtrl.h>
-#include <Psapi.h>
-#include <shellapi.h>
-#include <dwmapi.h>
-#include <shlwapi.h>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <fstream>
-#include <map>
-#include <set>
-#include <mutex>
-#include <atomic>
-#include <memory>
-#include <algorithm>
-#include <functional>
-#include <queue>
-#include "RtMidi.h"
+﻿/**
+ * MIDITypist — Main Entry Point
+ * Handles WebView2 init, Window Procedure, Message Dispatch, and App Lifecycle.
+ * Module functions are defined in:
+ *   bridge.cpp, input_simulation.cpp, config.cpp,
+ *   tray.cpp, midi_engine.cpp, app_context.cpp
+ */
 
-// WebView2
-#include <wrl.h>
-#include <wil/com.h>
-// Suppress warnings from external libraries
-#pragma warning(push)
-#pragma warning(disable: 26819) // Unannotated fallthrough in json.hpp
-#pragma warning(disable: 26495) // Uninitialized member in json.hpp
-#pragma warning(disable: 28182) // Dereferencing null pointer in wil/resource.h
-#include "json.hpp"
-#include <wil/result.h>
-#include <wil/resource.h>
-#include "WebView2.h"
-#pragma warning(pop)
+#include "globals.h"
+#include "bridge.h"
+#include "input_simulation.h"
+#include "config.h"
+#include "tray.h"
+#include "midi_engine.h"
+#include "app_context.h"
 
-#pragma comment(lib, "Comctl32.lib")
-#pragma comment(lib, "Psapi.lib")
-#pragma comment(lib, "Shell32.lib")
-#pragma comment(lib, "dwmapi.lib")
-#pragma comment(lib, "Shlwapi.lib")
+// ══════════════════════════════════════════
+//  Global State (Definitions)
+// ══════════════════════════════════════════
 
-using namespace Microsoft::WRL;
-using json = nlohmann::json;
-
-#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
-#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
-#endif
-#ifndef DWMWA_MICA_EFFECT
-#define DWMWA_MICA_EFFECT 1029
-#endif
-
-// ── Timers & Tray ──
-#define RECONNECT_TIMER_ID 502
-#define RECONNECT_INTERVAL 3000
-#define WM_TRAYICON (WM_USER + 1)
-#define IDI_APP_ICON 101
-#define ID_TRAY_SHOW 4001
-#define ID_TRAY_EXIT 4002
-
-// ── Piano Roll ──
-#define PIANO_TOTAL_KEYS 128
-#define PIANO_DECAY_TIMER 503
-#define PIANO_DECAY_MS 50
-#define CHORD_TIMER_ID 504
-#define CHORD_THRESHOLD_MS 60 // Window to group notes into a chord
-#define WM_CHORD_SIGNAL (WM_USER + 201)
-#define WM_LEARN_MIDI_SIGNAL (WM_USER + 202)
-#define WM_UI_BRIDGE_SIGNAL (WM_USER + 203)
-#define GESTURE_TIMER_ID 505
-#define GESTURE_WINDOW_MS 300
-#define LONG_HOLD_MS 800
-
-// ── Global State ──
 HINSTANCE g_hInst;
 HWND g_hwndMain = nullptr;
 wil::com_ptr<ICoreWebView2> g_webview;
@@ -81,25 +28,6 @@ std::vector<std::string> g_ports;
 bool g_connected = false;
 int g_lastConnectedPort = -1;
 std::string g_lastConnectedPortName;
-
-// ── Mapping struct ──
-struct Mapping {
-    int midi_type;      // 0=Note, 1=CC, 2=Chord, 3=LayerKey, 4=Macro, 5=AI
-    int midi_num;       // for Note/CC/LayerKey/Macro/AI
-    std::vector<int> midi_chord; // for Chord
-    int key_vk;
-    int modifiers;      // bitmask: 1=Ctrl, 2=Shift, 4=Alt
-    int vel_min;
-    int vel_zone;       // 0=any, 1=soft(1-63), 2=hard(64-127)
-    int cc_action;      // 0=keypress, 1=mouse_x, 2=mouse_y, 3=scroll, 4=hold_key
-    int profile_switch; // -1=normal, 0+=profile slot index
-    std::string macro_text; // for Macro
-    std::string ai_prompt;  // for AI
-    std::string title_pattern; // for Context Filter
-    std::string app_pattern;   // for Process Filter (e.g. chrome.exe)
-    int gesture_id;     // 0=Single/Any, 1=Double Tap, 2=Long Hold
-    bool enabled = true; // Enable/disable toggle
-};
 
 std::vector<Mapping> g_mappings;
 std::recursive_mutex g_mappingsMutex;
@@ -115,13 +43,6 @@ std::wstring g_currentApp;
 std::wstring g_currentWindowTitle;
 HWINEVENTHOOK g_hWinEventHook = nullptr;
 
-// ── Gesture State ──
-struct KeyState {
-    ULONGLONG lastPressTime = 0;
-    int tapCount = 0;
-    bool processingGesture = false;
-    bool holdTriggered = false;
-};
 std::map<int, KeyState> g_keyStates;
 std::mutex g_gestureMutex;
 
@@ -168,857 +89,17 @@ HHOOK g_hKeyboardHook = NULL;
 
 // ── Performance Flags ──
 std::atomic<bool> g_chordsEnabled{false};
-std::set<int> g_gestureNotes; // Notes that actually have gesture mappings
+std::set<int> g_gestureNotes;
 std::mutex g_gestureNotesMutex;
 ULONGLONG g_lastUiPushTime = 0;
-const ULONGLONG UI_THROTTLE_MS = 16; // ~60fps for UI updates
+const ULONGLONG UI_THROTTLE_MS = 16; // ~60fps
 const std::string APP_VERSION = "1.1";
 
-
-// ── Forward Declarations ──
-void SendMappingsToUI();
-void ResolveGesture(int midi_num, int gesture_id);
+// ── Forward Declaration ──
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 
 // ══════════════════════════════════════════
-//  Utility Functions
-// ══════════════════════════════════════════
-
-std::wstring Utf8ToWide(const std::string& str) {
-    if (str.empty()) return L"";
-    int len = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), nullptr, 0);
-    std::wstring wstr(len, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), &wstr[0], len);
-    return wstr;
-}
-
-std::string WideToUtf8(const std::wstring& wstr) {
-    if (wstr.empty()) return "";
-    int len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.size(), nullptr, 0, nullptr, nullptr);
-    std::string str(len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.size(), &str[0], len, nullptr, nullptr);
-    return str;
-}
-
-std::wstring GetKeyName(int vk) {
-    UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
-    long param = (sc << 16);
-    if (vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END ||
-        vk == VK_NEXT || vk == VK_PRIOR || vk == VK_LEFT || vk == VK_RIGHT ||
-        vk == VK_UP || vk == VK_DOWN || vk == VK_DIVIDE) {
-        param |= (1 << 24);
-    }
-    wchar_t name[64] = { 0 };
-    if (GetKeyNameText(param, name, 64) > 0) return name;
-    std::wstringstream ws;
-    ws << L"VK_" << vk;
-    return ws.str();
-}
-
-std::wstring GetModifierString(int mods) {
-    std::wstring s;
-    if (mods & 1) s += L"Ctrl+";
-    if (mods & 2) s += L"Shift+";
-    if (mods & 4) s += L"Alt+";
-    return s;
-}
-
-std::wstring GetConfigDir() {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(NULL, path, MAX_PATH);
-    std::wstring p(path);
-    return p.substr(0, p.find_last_of(L"\\") + 1);
-}
-
-// ══════════════════════════════════════════
-//  WebView2 Message Bridge
-// ══════════════════════════════════════════
-
-void PostToWebView(const json& msg) {
-    if (!g_webview) return;
-    {
-        std::lock_guard<std::mutex> lock(g_uiMessageMutex);
-        g_uiMessageQueue.push(msg);
-    }
-    if (g_hwndMain) PostMessage(g_hwndMain, WM_UI_BRIDGE_SIGNAL, 0, 0);
-}
-
-void SendLog(const std::string& text, const std::string& category = "system") {
-    PostToWebView({ {"type", "log"}, {"text", text}, {"category", category} });
-}
-
-void SendStatus(const std::string& text) {
-    PostToWebView({ {"type", "status"}, {"text", text} });
-}
-
-void SendMappingsToUI() {
-    json arr = json::array();
-    
-    // Performance optimization: Check if chords or gestures are needed
-    bool hasChords = false;
-    std::set<int> gestureNotes;
-
-    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-    for (const auto& m : g_mappings) {
-        if (m.midi_type == 2) hasChords = true;
-        if (m.gesture_id > 0) gestureNotes.insert(m.midi_num);
-
-        std::wstring targetDisplay;
-        if (m.profile_switch >= 0) {
-            targetDisplay = L"[Profile #" + std::to_wstring(m.profile_switch) + L"]";
-        } else if (m.midi_type == 1 && m.cc_action > 0) {
-            const wchar_t* actions[] = { L"", L"MouseX", L"MouseY", L"Scroll", L"HoldKey" };
-            targetDisplay = actions[m.cc_action];
-            if (m.cc_action == 4) targetDisplay += L"(" + GetKeyName(m.key_vk) + L")";
-        } else {
-            targetDisplay = GetModifierString(m.modifiers) + GetKeyName(m.key_vk);
-        }
-
-        json item = {
-            {"midi_type", m.midi_type}, {"midi_num", m.midi_num},
-            {"key_vk", m.key_vk}, {"modifiers", m.modifiers},
-            {"vel_min", m.vel_min}, {"vel_zone", m.vel_zone},
-            {"cc_action", m.cc_action}, {"profile_switch", m.profile_switch},
-            {"target_display", WideToUtf8(targetDisplay)},
-            {"macro_text", m.macro_text},
-            {"ai_prompt", m.ai_prompt},
-            {"title_pattern", m.title_pattern},
-            {"app_pattern", m.app_pattern},
-            {"gesture_id", m.gesture_id}
-        };
-        if (m.midi_type == 2) item["midi_chord"] = m.midi_chord;
-        item["enabled"] = m.enabled;
-        arr.push_back(item);
-    }
-
-    g_chordsEnabled.store(hasChords, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
-        g_gestureNotes = gestureNotes;
-    }
-    PostToWebView({ {"type", "mappings"}, {"mappings", arr} });
-}
-
-// ══════════════════════════════════════════
-//  Key Simulation (with modifiers)
-// ══════════════════════════════════════════
-
-// ── Improved Key Simulation (Game Compatible) ──
-void SendKeyInput(int vk, bool down, int modifiers = 0) {
-    std::vector<INPUT> inputs;
-    
-    // 1. Helper to create ScanCode INPUT
-    auto CreateInput = [](int virtualKey, bool isDown) {
-        INPUT input = {};
-        input.type = INPUT_KEYBOARD;
-        UINT sc = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-        input.ki.wScan = (WORD)sc;
-        input.ki.dwFlags = KEYEVENTF_SCANCODE | (isDown ? 0 : KEYEVENTF_KEYUP);
-        
-        // 2. Handle Extended Keys (Arrows, Numpad Enter, etc.)
-        if (virtualKey == VK_LEFT || virtualKey == VK_UP || virtualKey == VK_RIGHT || virtualKey == VK_DOWN ||
-            virtualKey == VK_PRIOR || virtualKey == VK_NEXT || virtualKey == VK_END || virtualKey == VK_HOME ||
-            virtualKey == VK_INSERT || virtualKey == VK_DELETE || virtualKey == VK_DIVIDE || virtualKey == VK_RMENU || 
-            virtualKey == VK_RCONTROL) {
-            input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-        }
-        return input;
-    };
-
-    // 3. Press Modifiers (if down)
-    if (down && modifiers > 0) {
-        if (modifiers & 1) inputs.push_back(CreateInput(VK_CONTROL, true));
-        if (modifiers & 2) inputs.push_back(CreateInput(VK_SHIFT, true));
-        if (modifiers & 4) inputs.push_back(CreateInput(VK_MENU, true)); // Alt
-    }
-
-    // 4. Main Key
-    inputs.push_back(CreateInput(vk, down));
-
-    // 5. Release Modifiers (if up)
-    if (!down && modifiers > 0) {
-        if (modifiers & 4) inputs.push_back(CreateInput(VK_MENU, false));
-        if (modifiers & 2) inputs.push_back(CreateInput(VK_SHIFT, false));
-        if (modifiers & 1) inputs.push_back(CreateInput(VK_CONTROL, false));
-    }
-
-    if (!inputs.empty()) {
-        SendInput((UINT)inputs.size(), inputs.data(), sizeof(INPUT));
-    }
-}
-
-void SimulateKeyCombo(int vk, int modifiers) {
-    SendKeyInput(vk, true, modifiers);
-    SendKeyInput(vk, false, modifiers);
-}
-
-void SimulateHoldKey(int vk, bool down) {
-    SendKeyInput(vk, down, 0); // Modifiers not used for simple CC-Hold tags
-}
-
-void SimulateMouseMove(int dx, int dy) {
-    INPUT input = {};
-    input.type = INPUT_MOUSE;
-    input.mi.dx = dx;
-    input.mi.dy = dy;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE;
-    SendInput(1, &input, sizeof(INPUT));
-}
-
-void SimulateScroll(int amount) {
-    INPUT input = {};
-    input.type = INPUT_MOUSE;
-    input.mi.mouseData = amount;
-    input.mi.dwFlags = MOUSEEVENTF_WHEEL;
-    SendInput(1, &input, sizeof(INPUT));
-}
-
-void SimulateText(const std::string& text) {
-    if (text.empty()) return;
-    std::wstring wtext = Utf8ToWide(text);
-    std::vector<INPUT> inputs;
-    for (wchar_t ch : wtext) {
-        INPUT inDown = {};
-        inDown.type = INPUT_KEYBOARD;
-        inDown.ki.wScan = ch;
-        inDown.ki.dwFlags = KEYEVENTF_UNICODE;
-        inputs.push_back(inDown);
-
-        INPUT inUp = inDown;
-        inUp.ki.dwFlags |= KEYEVENTF_KEYUP;
-        inputs.push_back(inUp);
-    }
-    SendInput((UINT)inputs.size(), inputs.data(), sizeof(INPUT));
-}
-
-// ══════════════════════════════════════════
-//  Mapping Persistence
-// ══════════════════════════════════════════
-
-void SaveMappings(const std::wstring& filename) {
-    // Serialize under lock, then write asynchronously to avoid blocking UI
-    json j = json::array();
-    {
-        std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-        for (const auto& m : g_mappings) {
-            json item = {
-                {"midi_type", m.midi_type}, {"midi_num", m.midi_num},
-                {"key_vk", m.key_vk}, {"modifiers", m.modifiers},
-                {"vel_min", m.vel_min}, {"vel_zone", m.vel_zone},
-                {"cc_action", m.cc_action}, {"profile_switch", m.profile_switch}
-            };
-            if (m.midi_type == 2) item["midi_chord"] = m.midi_chord;
-            if (m.midi_type == 4) item["macro_text"] = m.macro_text;
-            if (m.midi_type == 5) item["ai_prompt"] = m.ai_prompt;
-            if (!m.title_pattern.empty()) item["title_pattern"] = m.title_pattern;
-            if (!m.app_pattern.empty()) item["app_pattern"] = m.app_pattern;
-            item["gesture_id"] = m.gesture_id;
-            item["enabled"] = m.enabled;
-            j.push_back(item);
-        }
-    }
-    // Async file write to prevent UI thread blocking on disk I/O
-    std::thread([filename, j]() {
-        std::ofstream f(filename);
-        if (f) f << j.dump(4);
-    }).detach();
-}
-
-void LoadMappings(const std::wstring& filename) {
-    std::ifstream f(filename);
-    if (!f) {
-        SendLog("Failed to open profile: file not found.", "error");
-        return;
-    }
-    json j;
-    try { f >> j; } catch (const std::exception& e) {
-        SendLog(std::string("Profile load error: ") + e.what(), "error");
-        return;
-    } catch (...) {
-        SendLog("Profile load error: unknown format.", "error");
-        return;
-    }
-    {
-        std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-        g_mappings.clear();
-        for (const auto& it : j) {
-            Mapping m = {};
-            m.midi_type = it.value("midi_type", 0);
-            m.midi_num = it.value("midi_num", 0);
-            if (it.contains("midi_chord") && it["midi_chord"].is_array()) {
-                m.midi_chord = it["midi_chord"].get<std::vector<int>>();
-            }
-            m.macro_text = it.value("macro_text", "");
-            m.ai_prompt = it.value("ai_prompt", "");
-            m.title_pattern = it.value("title_pattern", "");
-            m.app_pattern = it.value("app_pattern", "");
-            m.gesture_id = it.value("gesture_id", 0);
-            m.key_vk = it.value("key_vk", 0);
-            m.modifiers = it.value("modifiers", 0);
-            m.vel_min = it.value("vel_min", 1);
-            m.vel_zone = it.value("vel_zone", 0);
-            m.cc_action = it.value("cc_action", 0);
-            m.profile_switch = it.value("profile_switch", -1);
-            m.enabled = it.value("enabled", true);
-            g_mappings.push_back(m);
-        }
-    }
-    g_lastProfilePath = filename;
-    SendMappingsToUI();
-}
-
-// ══════════════════════════════════════════
-//  Persistent Config
-// ══════════════════════════════════════════
-
-void SaveConfig() {
-    json cfg;
-    cfg["last_port"] = g_lastConnectedPortName;
-    cfg["last_profile"] = WideToUtf8(g_lastProfilePath);
-    cfg["auto_reconnect"] = g_autoReconnect;
-    cfg["app_switching_enabled"] = g_appSwitchingEnabled;
-    json bindings = json::object();
-    for (auto& [exe, profile] : g_appProfileBindings)
-        bindings[WideToUtf8(exe)] = WideToUtf8(profile);
-    cfg["app_bindings"] = bindings;
-    json slots = json::array();
-    for (auto& s : g_profileSlots)
-        slots.push_back(WideToUtf8(s));
-    cfg["profile_slots"] = slots;
-    cfg["ai_api_key"] = g_aiApiKey;
-    cfg["ai_global_prompt"] = g_aiGlobalPrompt;
-    cfg["velocity_zones_enabled"] = g_velocityZonesEnabled;
-    cfg["minimize_to_tray_enabled"] = g_minimizeToTrayEnabled;
-    cfg["config_version"] = APP_VERSION;
-    std::ofstream f(g_configPath);
-    if (f) f << cfg.dump(4);
-}
-
-void LoadConfig() {
-    std::ifstream f(g_configPath);
-    if (!f) return;
-    json cfg;
-    try { f >> cfg; } catch (...) { return; }
-    g_lastConnectedPortName = cfg.value("last_port", "");
-    g_lastProfilePath = Utf8ToWide(cfg.value("last_profile", ""));
-    g_autoReconnect = cfg.value("auto_reconnect", true);
-    g_appSwitchingEnabled = cfg.value("app_switching_enabled", true);
-    if (cfg.contains("app_bindings") && cfg["app_bindings"].is_object()) {
-        for (auto& [k, v] : cfg["app_bindings"].items())
-            g_appProfileBindings[Utf8ToWide(k)] = Utf8ToWide(v.get<std::string>());
-    }
-    g_aiApiKey = cfg.value("ai_api_key", "");
-    g_aiGlobalPrompt = cfg.value("ai_global_prompt", "You are a desktop automation assistant. Perform the following task briefly: {prompt}");
-    g_velocityZonesEnabled = cfg.value("velocity_zones_enabled", true);
-    g_minimizeToTrayEnabled = cfg.value("minimize_to_tray_enabled", true);
-
-    if (cfg.contains("profile_slots") && cfg["profile_slots"].is_array()) {
-        g_profileSlots.clear();
-        for (auto& s : cfg["profile_slots"])
-            g_profileSlots.push_back(Utf8ToWide(s.get<std::string>()));
-    }
-}
-
-// ══════════════════════════════════════════
-//  System Tray
-// ══════════════════════════════════════════
-
-void AddTrayIcon(HWND hwnd) {
-    g_nid.cbSize = sizeof(NOTIFYICONDATA);
-    g_nid.hWnd = hwnd;
-    g_nid.uID = 1;
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    g_nid.uCallbackMessage = WM_TRAYICON;
-    g_nid.hIcon = LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_APP_ICON));
-    wcscpy_s(g_nid.szTip, L"MIDITypist");
-    Shell_NotifyIcon(NIM_ADD, &g_nid);
-}
-
-void RemoveTrayIcon() {
-    Shell_NotifyIcon(NIM_DELETE, &g_nid);
-}
-
-void MinimizeToTray(HWND hwnd) {
-    ShowWindow(hwnd, SW_HIDE);
-    g_minimizedToTray = true;
-}
-
-void RestoreFromTray(HWND hwnd) {
-    ShowWindow(hwnd, SW_SHOW);
-    SetForegroundWindow(hwnd);
-    g_minimizedToTray = false;
-}
-
-// ══════════════════════════════════════════
-//  MIDI Callback
-// ══════════════════════════════════════════
-
-void ProcessMIDIEvent(int type, int number, int velocity);
-
-void midiCallback(double, std::vector<unsigned char>* msg, void*) {
-    if (msg->size() < 3) return;
-    int status = (*msg)[0];
-    int number = (*msg)[1];
-    int velocity = (*msg)[2];
-
-    bool isNoteOn = (status & 0xF0) == 0x90 && velocity > 0;
-    bool isNoteOff = (status & 0xF0) == 0x80 || ((status & 0xF0) == 0x90 && velocity == 0);
-    bool isCC = (status & 0xF0) == 0xB0;
-
-    // Learning mode check
-    {
-        std::lock_guard<std::mutex> lock(g_learnMutex);
-        if (g_learning && g_learn_pending.midi_type == -1) {
-            bool learnThis = false;
-            int type = 0;
-            if (isNoteOn) {
-                type = 0;
-                learnThis = true;
-            } else if (isCC && number < 120) { // Filter CC noise
-                type = 1;
-                learnThis = true;
-            }
-
-            if (learnThis) {
-                // Post to main thread to handle transition
-                PostMessage(g_hwndMain, WM_LEARN_MIDI_SIGNAL, (WPARAM)type, (LPARAM)number);
-                return; // Exit callback if learning
-            }
-        }
-    }
-
-    // Track physical state
-    if (isNoteOn) g_pianoPhysicalDown[number].store(true, std::memory_order_relaxed);
-    if (isNoteOff) g_pianoPhysicalDown[number].store(false, std::memory_order_relaxed);
-
-    // CC immediately if not learning
-    if (isCC) {
-        ProcessMIDIEvent(status & 0xF0, number, velocity);
-    }
-    
-    // Chord grouping logic or Instant Trigger
-    if (isNoteOn) {
-        if (g_chordsEnabled.load(std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lock(g_chordMutex);
-            g_chordBuffer.push_back(number);
-            PostMessage(g_hwndMain, WM_CHORD_SIGNAL, 0, 0);
-        } else {
-            // Bypass chord detection for zero-latency
-            ProcessMIDIEvent(0x90, number, velocity);
-        }
-    }
-    
-    // Process Note Off immediately
-    if (isNoteOff) {
-        ProcessMIDIEvent(status & 0xF0, number, velocity);
-    }
-}
-
-void ProcessChord(const std::vector<int>& chord) {
-    if (chord.empty()) return;
-
-    std::vector<int> sortedChord = chord;
-    std::sort(sortedChord.begin(), sortedChord.end());
-    sortedChord.erase(std::unique(sortedChord.begin(), sortedChord.end()), sortedChord.end());
-
-    std::string chordStr = "";
-    for (int n : sortedChord) chordStr += std::to_string(n) + " ";
-    SendLog("Processing MIDI chord: [ " + chordStr + "]");
-    
-    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-    bool found = false;
-
-    // 1. Try to find a specific chord mapping
-    if (sortedChord.size() > 1) {
-        for (const auto& m : g_mappings) {
-            if (m.midi_type != 2) continue;
-
-            // Context Stack Filtering
-            if (!m.title_pattern.empty()) {
-                std::string currentTitle = WideToUtf8(g_currentWindowTitle);
-                if (currentTitle.find(m.title_pattern) == std::string::npos) continue;
-            }
-            if (!m.app_pattern.empty()) {
-                std::string currentApp = WideToUtf8(g_currentApp);
-                if (currentApp.find(m.app_pattern) == std::string::npos) continue;
-            }
-
-            // Compare sorted notes
-            std::vector<int> targetChord = m.midi_chord;
-            std::sort(targetChord.begin(), targetChord.end());
-            targetChord.erase(std::unique(targetChord.begin(), targetChord.end()), targetChord.end());
-
-            if (targetChord == sortedChord) {
-                SimulateKeyCombo(m.key_vk, m.modifiers);
-                SendLog("Match found! Triggering VK " + std::to_string(m.key_vk));
-                found = true;
-                break;
-            }
-        }
-    }
-
-    // 2. If no chord mapping or single note, process individual mappings
-    if (!found) {
-        for (int note : sortedChord) {
-            ProcessMIDIEvent(0x90, note, 100); // Trigger as standard Note On
-        }
-    }
-}
-
-void ProcessMIDIEvent(int type, int number, int velocity) {
-    bool isNoteOn = (type == 0x90) && velocity > 0;
-    bool isNoteOff = (type == 0x80) || ((type == 0x90) && velocity == 0);
-    bool isCC = (type == 0xB0);
-
-    // Update Piano Roll and Gesture state
-    if (isNoteOn && number >= 0 && number < 128) {
-        g_pianoVelocity[number] = velocity;
-        
-        // UI Throttling
-        ULONGLONG now = GetTickCount64();
-        if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
-            PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", velocity} });
-            g_lastUiPushTime = now;
-        }
-        
-        // Gesture Logic (Only if needed for this note)
-        bool hasGesture = false;
-        {
-            std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
-            hasGesture = g_gestureNotes.count(number) > 0;
-        }
-        if (hasGesture) {
-            std::lock_guard<std::mutex> lock(g_gestureMutex);
-            auto& state = g_keyStates[number];
-            ULONGLONG pressTime = GetTickCount64();
-            if (pressTime - state.lastPressTime < GESTURE_WINDOW_MS) {
-                state.tapCount++;
-            } else {
-                state.tapCount = 1;
-                SetTimer(g_hwndMain, GESTURE_TIMER_ID + number, GESTURE_WINDOW_MS, NULL);
-            }
-            state.lastPressTime = pressTime;
-            state.processingGesture = true;
-            state.holdTriggered = false;
-        }
-    }
-    else if (isNoteOff && number >= 0 && number < 128) {
-        g_pianoVelocity[number] = 0;
-        
-        ULONGLONG now = GetTickCount64();
-        if (now - g_lastUiPushTime > UI_THROTTLE_MS) {
-            PostToWebView({ {"type", "midi_note"}, {"note", number}, {"velocity", 0} });
-            g_lastUiPushTime = now;
-        }
-        
-        bool hasGestureOff = false;
-        {
-            std::lock_guard<std::mutex> gLock(g_gestureNotesMutex);
-            hasGestureOff = g_gestureNotes.count(number) > 0;
-        }
-        if (hasGestureOff) {
-            std::lock_guard<std::mutex> lock(g_gestureMutex);
-            auto& state = g_keyStates[number];
-            ULONGLONG duration = GetTickCount64() - state.lastPressTime;
-            if (duration >= LONG_HOLD_MS && !state.holdTriggered) {
-                state.holdTriggered = true;
-                KillTimer(g_hwndMain, GESTURE_TIMER_ID + number);
-                state.tapCount = 0;
-                state.processingGesture = false;
-                ResolveGesture(number, 2); // Long Hold
-            }
-        }
-    }
-
-    int oldCCVal = -1;
-    if (isCC && number >= 0 && number < 128) {
-        oldCCVal = g_pianoCC[number];
-        g_pianoCC[number] = velocity;
-        PostToWebView({ {"type", "midi_cc"}, {"cc", number}, {"value", velocity} });
-
-        // Global Sustain Pedal Support (CC 64)
-        if (number == 64) {
-            std::lock_guard<std::mutex> lock(g_sustainMutex);
-            if (velocity > 63 && !g_sustainActive) {
-                g_sustainActive = true;
-                SendLog("Sustain Pedal: ON", "mapping");
-            } else if (velocity <= 63 && g_sustainActive) {
-                g_sustainActive = false;
-                SendLog("Sustain Pedal: OFF", "mapping");
-                for (int vk : g_sustainedVKs) {
-                    SendKeyInput(vk, false);
-                }
-                g_sustainedVKs.clear();
-            }
-        }
-    }
-
-    // CC edge detection flags
-    bool ccCrossedUp = (isCC && oldCCVal <= 63 && velocity > 63);
-    bool ccCrossedDown = (isCC && oldCCVal > 63 && velocity <= 63);
-
-    // Execute mappings
-    // Pre-compute context strings once (not per-mapping)
-    std::string cachedTitle = WideToUtf8(g_currentWindowTitle);
-    std::string cachedApp = WideToUtf8(g_currentApp);
-
-    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-    for (const auto& m : g_mappings) {
-        if (!m.enabled) continue; // Skip disabled mappings
-
-        // Context filtering (using pre-computed strings)
-        if (!m.title_pattern.empty()) {
-            if (cachedTitle.find(m.title_pattern) == std::string::npos) continue;
-        }
-        if (!m.app_pattern.empty()) {
-            if (cachedApp.find(m.app_pattern) == std::string::npos) continue;
-        }
-
-        // Profile switching
-        if (m.profile_switch >= 0) {
-            if (m.midi_type == 0 && isNoteOn && number == m.midi_num) {
-                if (m.profile_switch < (int)g_profileSlots.size()) {
-                    PostMessage(g_hwndMain, WM_USER + 100, m.profile_switch, 0);
-                }
-            }
-            continue;
-        }
-
-        // Note-to-Key Mapping
-        if (m.midi_type == 0 && number == m.midi_num && m.gesture_id == 0) {
-            if (isNoteOn) {
-                if (!g_pianoPhysicalDown[number].load(std::memory_order_relaxed)) continue; // Rapid tap safety
-                if (velocity < m.vel_min) continue;
-                if (g_velocityZonesEnabled) {
-                    if (m.vel_zone == 1 && velocity > 63) continue;
-                    if (m.vel_zone == 2 && velocity < 64) continue;
-                }
-                SendKeyInput(m.key_vk, true, m.modifiers);
-                if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
-            }
-            else if (isNoteOff) {
-                std::lock_guard<std::mutex> lock(g_sustainMutex);
-                if (g_sustainActive) {
-                    g_sustainedVKs.insert(m.key_vk);
-                    if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Sustaining VK " + std::to_string(m.key_vk), "mapping");
-                } else {
-                    SendKeyInput(m.key_vk, false, m.modifiers);
-                    if (g_verboseLogging) SendLog("Note " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
-                }
-            }
-        }
-
-        // CC-to-Action Mapping (Edge Detected)
-        if (m.midi_type == 1 && isCC && number == m.midi_num) {
-            switch (m.cc_action) {
-            case 0: // Keypress (Now Momentary by default for games)
-                if (ccCrossedUp) {
-                    SendKeyInput(m.key_vk, true, m.modifiers);
-                    if (g_verboseLogging) SendLog("CC " + std::to_string(number) + " -> Key Down: " + std::to_string(m.key_vk), "mapping");
-                } else if (ccCrossedDown) {
-                    SendKeyInput(m.key_vk, false, m.modifiers);
-                    if (g_verboseLogging) SendLog("CC " + std::to_string(number) + " -> Key Up: " + std::to_string(m.key_vk), "mapping");
-                }
-                break;
-            case 1: SimulateMouseMove((velocity - 64) * 2, 0); break;
-            case 2: SimulateMouseMove(0, (velocity - 64) * 2); break;
-            case 3: SimulateScroll((velocity - 64) * 20); break;
-            case 4: // Hold Key (Dedicated toggle behavior or held state)
-                if (ccCrossedUp && !g_ccHoldActive[m.midi_num]) {
-                    SendKeyInput(m.key_vk, true);
-                    g_ccHoldActive[m.midi_num] = true;
-                }
-                else if (ccCrossedDown && g_ccHoldActive[m.midi_num]) {
-                    SendKeyInput(m.key_vk, false);
-                    g_ccHoldActive[m.midi_num] = false;
-                }
-                break;
-            }
-        }
-        
-        // Macros, AI, HUD
-        if (m.midi_type == 4 && isNoteOn && number == m.midi_num && m.gesture_id == 0) {
-            SimulateText(m.macro_text);
-        }
-        if (m.midi_type == 5 && isNoteOn && number == m.midi_num && m.gesture_id == 0) {
-            PostToWebView({ {"type", "run_ai"}, {"prompt", m.ai_prompt} });
-            SendLog("AI Prompt sent: " + m.ai_prompt);
-        }
-        if (m.midi_type == 3 && number == m.midi_num) {
-            if (isNoteOn) PostToWebView({ {"type", "hud"}, {"active", true}, {"title", WideToUtf8(GetModifierString(m.modifiers) + GetKeyName(m.key_vk))} });
-            else if (isNoteOff) PostToWebView({ {"type", "hud"}, {"active", false} });
-        }
-    }
-}
-
-void ResolveGesture(int midi_num, int gesture_id) {
-    std::string cachedTitle = WideToUtf8(g_currentWindowTitle);
-    std::string cachedApp = WideToUtf8(g_currentApp);
-    std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-    for (const auto& m : g_mappings) {
-        if (!m.enabled) continue;
-        if (m.midi_num != midi_num) continue;
-        
-        // Exact gesture match, and ignore gesture 0 here because it's handled immediately in ProcessMIDIEvent
-        if (m.gesture_id != gesture_id || m.gesture_id == 0) continue;
-
-        // Context check
-        if (!m.title_pattern.empty()) {
-            if (cachedTitle.find(m.title_pattern) == std::string::npos) continue;
-        }
-        if (!m.app_pattern.empty()) {
-            if (cachedApp.find(m.app_pattern) == std::string::npos) continue;
-        }
-
-        // Execute (Simplified trigger for gesture demo)
-        if (m.midi_type == 0) SimulateKeyCombo(m.key_vk, m.modifiers);
-        else if (m.midi_type == 4) SimulateText(m.macro_text);
-        else if (m.midi_type == 5) PostToWebView({ {"type", "run_ai"}, {"prompt", m.ai_prompt} });
-    }
-}
-
-// ══════════════════════════════════════════
-//  MIDI Port Management & Auto-Reconnect
-// ══════════════════════════════════════════
-
-void ScanMidiPorts() {
-    g_ports.clear();
-    RtMidiIn tempIn;
-    int n = tempIn.getPortCount();
-    json portsArr = json::array();
-    for (int i = 0; i < n; ++i) {
-        std::string name = tempIn.getPortName(i);
-        g_ports.push_back(name);
-        portsArr.push_back(name);
-    }
-    PostToWebView({ {"type", "ports"}, {"ports", portsArr} });
-}
-
-void ConnectMidi(int portIndex) {
-    if (portIndex < 0 || portIndex >= (int)g_ports.size()) return;
-    try {
-        g_midiIn = std::make_unique<RtMidiIn>();
-        g_midiIn->openPort(portIndex);
-        g_midiIn->setCallback(&midiCallback);
-        g_connected = true;
-        g_lastConnectedPort = portIndex;
-        g_lastConnectedPortName = g_ports[portIndex];
-        PostToWebView({ {"type", "connected"}, {"portName", g_ports[portIndex]} });
-        SendLog("Connected to: " + g_ports[portIndex]);
-        SendStatus("Connected.");
-        SaveConfig();
-    }
-    catch (RtMidiError& e) {
-        SendLog("Connection failed: " + std::string(e.getMessage()));
-        g_midiIn.reset();
-    }
-}
-
-void DisconnectMidi() {
-    // Release any sustained keys before disconnecting
-    {
-        std::lock_guard<std::mutex> lock(g_sustainMutex);
-        for (int vk : g_sustainedVKs) {
-            SendKeyInput(vk, false);
-        }
-        g_sustainedVKs.clear();
-        g_sustainActive = false;
-    }
-    // Release all physically held keys
-    for (int i = 0; i < 128; i++) {
-        if (g_pianoPhysicalDown[i].load(std::memory_order_relaxed)) {
-            g_pianoPhysicalDown[i].store(false, std::memory_order_relaxed);
-        }
-    }
-    g_midiIn.reset();
-    g_connected = false;
-    PostToWebView({ {"type", "disconnected"} });
-    SendLog("MIDI disconnected.");
-    SendStatus("Disconnected.");
-}
-
-void TryAutoReconnect() {
-    if (g_connected || !g_autoReconnect || g_lastConnectedPortName.empty()) return;
-    RtMidiIn tempIn;
-    int n = tempIn.getPortCount();
-    for (int i = 0; i < n; i++) {
-        if (tempIn.getPortName(i) == g_lastConnectedPortName) {
-            ScanMidiPorts();
-            ConnectMidi(i);
-            if (g_connected) {
-                SendLog("Auto-reconnected to: " + g_lastConnectedPortName);
-                if (!g_lastProfilePath.empty()) {
-                    LoadMappings(g_lastProfilePath);
-                    SendLog("Auto-loaded last profile.");
-                }
-            }
-            return;
-        }
-    }
-}
-
-// ══════════════════════════════════════════
-//  Per-App Switching
-// ══════════════════════════════════════════
-
-void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
-
-void StartAppMonitoring() {
-    if (!g_hWinEventHook) {
-        g_hWinEventHook = SetWinEventHook(
-            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-            NULL, WinEventProc, 0, 0,
-            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    }
-}
-
-void StopAppMonitoring() {
-    if (g_hWinEventHook) {
-        UnhookWinEvent(g_hWinEventHook);
-        g_hWinEventHook = nullptr;
-    }
-}
-
-void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
-    if (event == EVENT_SYSTEM_FOREGROUND && hwnd) {
-        wchar_t path[MAX_PATH];
-        DWORD pid;
-        GetWindowThreadProcessId(hwnd, &pid);
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (hProcess) {
-            if (GetProcessImageFileNameW(hProcess, path, MAX_PATH)) {
-                wchar_t* filename = wcsrchr(path, L'\\');
-                if (filename) {
-                    g_currentApp = filename + 1;
-                    
-                    // Capture title too
-                    wchar_t title[512];
-                    if (GetWindowTextW(hwnd, title, 512)) {
-                        g_currentWindowTitle = title;
-                    } else {
-                        g_currentWindowTitle = L"";
-                    }
-
-                    PostToWebView({ 
-                        {"type", "app_changed"}, 
-                        {"app", WideToUtf8(g_currentApp)},
-                        {"title", WideToUtf8(g_currentWindowTitle)}
-                    });
-                    
-                    // Trigger profile switch if bound
-                    if (g_appProfileBindings.count(g_currentApp)) {
-                        LoadMappings(g_appProfileBindings[g_currentApp]);
-                        SendLog("Auto-switched profile for: " + WideToUtf8(g_currentApp));
-                    }
-                }
-            }
-            CloseHandle(hProcess);
-        }
-    }
-}
-
-// ══════════════════════════════════════════
-//  Handle messages from WebView2 (JS -> C++)
+//  HandleWebMessage (JS → C++ Dispatch)
 // ══════════════════════════════════════════
 
 void HandleWebMessage(const std::string& messageStr) {
@@ -1030,119 +111,151 @@ void HandleWebMessage(const std::string& messageStr) {
     if (action == "init") {
         ScanMidiPorts();
         SendMappingsToUI();
-        SendStatus("Ready");
-        
-        // Send current config to UI
-        json cfgMsg = {
+        // Send config to UI
+        PostToWebView({
             {"type", "config"},
             {"config", {
                 {"auto_reconnect", g_autoReconnect},
                 {"app_switching", g_appSwitchingEnabled},
-                {"ai_api_key", g_aiApiKey},
-                {"ai_global_prompt", g_aiGlobalPrompt},
                 {"velocity_zones", g_velocityZonesEnabled},
-                {"minimize_to_tray", g_minimizeToTrayEnabled}
+                {"minimize_to_tray", g_minimizeToTrayEnabled},
+                {"ai_api_key", g_aiApiKey},
+                {"ai_global_prompt", g_aiGlobalPrompt}
             }}
-        };
-        PostToWebView(cfgMsg);
-        // Auto-connect to last port
-        if (!g_lastConnectedPortName.empty()) {
-            for (int i = 0; i < (int)g_ports.size(); i++) {
+        });
+        // Auto-connect last port
+        if (!g_lastConnectedPortName.empty() && g_autoReconnect) {
+            for (int i = 0; i < (int)g_ports.size(); ++i) {
                 if (g_ports[i] == g_lastConnectedPortName) {
                     ConnectMidi(i);
+                    PostToWebView({ {"type", "ports"}, {"ports", g_ports}, {"selected", i} });
                     break;
                 }
             }
         }
+        // Auto-load last profile
         if (!g_lastProfilePath.empty()) {
             LoadMappings(g_lastProfilePath);
         }
     }
     else if (action == "toggle_connect") {
-        if (!g_connected) {
-            int port = msg.value("port", 0);
-            if (port < 0 || port >= (int)g_ports.size()) {
-                SendLog("Invalid port index: " + std::to_string(port), "error");
-                return;
-            }
-            ConnectMidi(port);
-        } else {
+        if (g_connected) {
             DisconnectMidi();
+        } else {
+            int port = msg.value("port", 0);
+            ScanMidiPorts();
+            ConnectMidi(port);
         }
+    }
+    else if (action == "select_port") {
+        // No-op, but keep for future MIDI Out support
     }
     else if (action == "start_learn") {
         std::lock_guard<std::mutex> lock(g_learnMutex);
         g_learning = true;
-        g_learnStartTime = GetTickCount64();
         g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
-        
-        // Clean up any stale hook
-        if (g_hKeyboardHook) {
-            UnhookWindowsHookEx(g_hKeyboardHook);
-            g_hKeyboardHook = NULL;
-        }
-
-        // Kill any pending chord timers and clear the buffer
-        KillTimer(g_hwndMain, CHORD_TIMER_ID);
-        {
-            std::lock_guard<std::mutex> chordLock(g_chordMutex);
-            g_chordBuffer.clear();
-        }
-
-        SendLog("Learning started: Waiting for MIDI...");
-        SendStatus("Waiting for MIDI input...");
-        PostToWebView({ {"type", "learn_phase"}, {"phase", 1}, {"text", "Waiting for MIDI..."} });
+        g_learnStartTime = GetTickCount64();
+        PostToWebView({ {"type", "learn_phase"}, {"phase", 1}, {"text", "Play a MIDI note or move a CC..."} });
+        SendLog("Learning mode: waiting for MIDI input...");
     }
     else if (action == "cancel_learn") {
         std::lock_guard<std::mutex> lock(g_learnMutex);
         g_learning = false;
-        KillTimer(g_hwndMain, CHORD_TIMER_ID);
+        PostToWebView({ {"type", "learn_done"} });
+        SendLog("Learning cancelled.");
         if (g_hKeyboardHook) {
             UnhookWindowsHookEx(g_hKeyboardHook);
             g_hKeyboardHook = NULL;
         }
-        g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
-        SendStatus("Learning cancelled.");
     }
     else if (action == "learn_key") {
-        if (g_learning && g_learn_pending.midi_type != -1) {
-            int keyCode = msg.value("keyCode", 0);
-            if (keyCode == 0) return;
-
-            g_learn_pending.key_vk = keyCode;
-            g_learn_pending.modifiers = 0;
-            if (msg.value("ctrlKey", false)) g_learn_pending.modifiers |= 1;
-            if (msg.value("shiftKey", false)) g_learn_pending.modifiers |= 2;
-            if (msg.value("altKey", false)) g_learn_pending.modifiers |= 4;
-
-            {
-                std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-                g_mappings.push_back(g_learn_pending);
-            }
-
-            std::wstring displayStr = L"Mapped MIDI ";
-            displayStr += (g_learn_pending.midi_type == 0 ? L"Note" : L"CC");
-            displayStr += L" " + std::to_wstring(g_learn_pending.midi_num);
-            displayStr += L" -> " + GetModifierString(g_learn_pending.modifiers) + GetKeyName(g_learn_pending.key_vk);
-            SendLog(WideToUtf8(displayStr));
-            SendMappingsToUI();
-            SendStatus("Mapped successfully.");
-
-            g_learning = false;
-            PostToWebView({ {"type", "learn_done"} });
+        // Phase 2: Install a low-level keyboard hook to capture the next keypress
+        std::lock_guard<std::mutex> lock(g_learnMutex);
+        if (!g_learning || g_learn_pending.midi_type == -1) {
+            SendLog("Learn key: Not in valid learn state.", "error");
+            return;
         }
+        PostToWebView({ {"type", "learn_phase"}, {"phase", 2}, {"text", "Press a key to assign..."} });
+        SendLog("Waiting for keyboard input...");
+
+        // Install hook
+        g_hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
+    }
+    else if (action == "add_mapping") {
+        {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            g_mappings.push_back({ 0, 60, {}, 0x41, 0, 1, 0, 0, -1, "", "", "", "", 0, true });
+        }
+        SendMappingsToUI();
+        SendLog("Added new mapping.");
     }
     else if (action == "delete_mapping") {
-        int index = msg.value("index", -1);
-        if (index >= 0) {
+        int idx = msg.value("index", -1);
+        {
             std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            if (index < (int)g_mappings.size()) {
-                g_mappings.erase(g_mappings.begin() + index);
+            if (idx >= 0 && idx < (int)g_mappings.size()) {
+                g_mappings.erase(g_mappings.begin() + idx);
             }
         }
         SendMappingsToUI();
-        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
-        SendLog("Mapping removed.");
+    }
+    else if (action == "toggle_mapping") {
+        int idx = msg.value("index", -1);
+        {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            if (idx >= 0 && idx < (int)g_mappings.size()) {
+                g_mappings[idx].enabled = !g_mappings[idx].enabled;
+            }
+        }
+        SendMappingsToUI();
+    }
+    else if (action == "update_mapping") {
+        int idx = msg.value("index", -1);
+        {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            if (idx >= 0 && idx < (int)g_mappings.size()) {
+                auto& m = g_mappings[idx];
+                if (msg.contains("midi_type")) m.midi_type = msg["midi_type"].get<int>();
+                if (msg.contains("key_vk")) m.key_vk = msg["key_vk"].get<int>();
+                if (msg.contains("gesture_id")) m.gesture_id = msg["gesture_id"].get<int>();
+                if (msg.contains("macro_text")) m.macro_text = msg["macro_text"].get<std::string>();
+                if (msg.contains("ai_prompt")) m.ai_prompt = msg["ai_prompt"].get<std::string>();
+                if (msg.contains("app_pattern")) m.app_pattern = msg["app_pattern"].get<std::string>();
+                if (msg.contains("title_pattern")) m.title_pattern = msg["title_pattern"].get<std::string>();
+                if (msg.contains("midi_chord") && msg["midi_chord"].is_array()) {
+                    m.midi_chord = msg["midi_chord"].get<std::vector<int>>();
+                }
+            }
+        }
+        SendMappingsToUI();
+    }
+    else if (action == "update_mappings") {
+        // Full mapping list update (from JS undo/reorder)
+        if (msg.contains("mappings") && msg["mappings"].is_array()) {
+            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+            g_mappings.clear();
+            for (const auto& it : msg["mappings"]) {
+                Mapping m = {};
+                m.midi_type = it.value("midi_type", 0);
+                m.midi_num = it.value("midi_num", 0);
+                m.key_vk = it.value("key_vk", 0);
+                m.modifiers = it.value("modifiers", 0);
+                m.vel_min = it.value("vel_min", 1);
+                m.vel_zone = it.value("vel_zone", 0);
+                m.cc_action = it.value("cc_action", 0);
+                m.profile_switch = it.value("profile_switch", -1);
+                m.macro_text = it.value("macro_text", "");
+                m.ai_prompt = it.value("ai_prompt", "");
+                m.title_pattern = it.value("title_pattern", "");
+                m.app_pattern = it.value("app_pattern", "");
+                m.gesture_id = it.value("gesture_id", 0);
+                m.enabled = it.value("enabled", true);
+                if (it.contains("midi_chord") && it["midi_chord"].is_array())
+                    m.midi_chord = it["midi_chord"].get<std::vector<int>>();
+                g_mappings.push_back(m);
+            }
+        }
+        SendMappingsToUI();
     }
     else if (action == "clear_mappings") {
         {
@@ -1150,129 +263,64 @@ void HandleWebMessage(const std::string& messageStr) {
             g_mappings.clear();
         }
         SendMappingsToUI();
-        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
         SendLog("All mappings cleared.");
     }
-    else if (action == "toggle_mapping") {
-        int index = msg.value("index", -1);
-        if (index >= 0) {
-            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            if (index < (int)g_mappings.size()) {
-                g_mappings[index].enabled = !g_mappings[index].enabled;
-            }
-        }
-        SendMappingsToUI();
-        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
-    }
-    else if (action == "update_mapping") {
-        int index = msg.value("index", -1);
-        if (index >= 0) {
-            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            if (index < (int)g_mappings.size()) {
-                Mapping& m = g_mappings[index];
-                m.midi_type = msg.value("midi_type", m.midi_type);
-                m.key_vk = msg.value("key_vk", m.key_vk);
-                m.macro_text = msg.value("macro_text", m.macro_text);
-                m.ai_prompt = msg.value("ai_prompt", m.ai_prompt);
-                
-                if (msg.contains("midi_chord") && msg["midi_chord"].is_array()) {
-                    std::vector<int> chord = msg["midi_chord"].get<std::vector<int>>();
-                    std::sort(chord.begin(), chord.end());
-                    chord.erase(std::unique(chord.begin(), chord.end()), chord.end());
-                    m.midi_chord = chord;
-                }
-
-                m.title_pattern = msg.value("title_pattern", m.title_pattern);
-                m.app_pattern = msg.value("app_pattern", m.app_pattern);
-                m.gesture_id = msg.value("gesture_id", m.gesture_id);
-            }
-        }
-        SendMappingsToUI();
-        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
-        SendLog("Mapping updated.");
-    }
     else if (action == "save_profile") {
-        OPENFILENAME ofn = {};
-        wchar_t file[MAX_PATH] = L"mappings.json";
+        wchar_t filepath[MAX_PATH] = { 0 };
+        OPENFILENAMEW ofn = {};
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = g_hwndMain;
         ofn.lpstrFilter = L"JSON Files\0*.json\0All Files\0*.*\0";
-        ofn.lpstrFile = file;
+        ofn.lpstrFile = filepath;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_OVERWRITEPROMPT;
         ofn.lpstrDefExt = L"json";
         if (GetSaveFileName(&ofn)) {
-            SaveMappings(file);
-            g_lastProfilePath = file;
+            SaveMappings(filepath);
+            g_lastProfilePath = filepath;
             SaveConfig();
-            SendLog("Profile saved: " + WideToUtf8(file));
+            SendLog("Profile saved: " + WideToUtf8(g_lastProfilePath));
         }
     }
     else if (action == "load_profile") {
-        OPENFILENAME ofn = {};
-        wchar_t file[MAX_PATH] = L"";
+        wchar_t filepath[MAX_PATH] = { 0 };
+        OPENFILENAMEW ofn = {};
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = g_hwndMain;
         ofn.lpstrFilter = L"JSON Files\0*.json\0All Files\0*.*\0";
-        ofn.lpstrFile = file;
+        ofn.lpstrFile = filepath;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_FILEMUSTEXIST;
         if (GetOpenFileName(&ofn)) {
-            LoadMappings(file);
+            LoadMappings(filepath);
             SaveConfig();
-            SendLog("Profile loaded: " + WideToUtf8(file));
+            SendLog("Profile loaded: " + WideToUtf8(g_lastProfilePath));
         }
     }
     else if (action == "update_config") {
-        g_autoReconnect = msg.value("auto_reconnect", true);
-        g_appSwitchingEnabled = msg.value("app_switching", false);
-        g_velocityZonesEnabled = msg.value("velocity_zones", true);
-        g_minimizeToTrayEnabled = msg.value("minimize_to_tray", true);
-        if (g_appSwitchingEnabled != (g_hWinEventHook != nullptr)) {
-            if (g_appSwitchingEnabled) StartAppMonitoring();
-            else StopAppMonitoring();
+        if (msg.contains("auto_reconnect")) g_autoReconnect = msg["auto_reconnect"].get<bool>();
+        if (msg.contains("app_switching")) {
+            bool newState = msg["app_switching"].get<bool>();
+            if (newState && !g_appSwitchingEnabled) StartAppMonitoring();
+            else if (!newState && g_appSwitchingEnabled) StopAppMonitoring();
+            g_appSwitchingEnabled = newState;
         }
-        g_aiApiKey = msg.value("ai_api_key", g_aiApiKey);
-        g_aiGlobalPrompt = msg.value("ai_global_prompt", g_aiGlobalPrompt);
+        if (msg.contains("velocity_zones")) g_velocityZonesEnabled = msg["velocity_zones"].get<bool>();
+        if (msg.contains("minimize_to_tray")) g_minimizeToTrayEnabled = msg["minimize_to_tray"].get<bool>();
+        if (msg.contains("ai_api_key")) g_aiApiKey = msg["ai_api_key"].get<std::string>();
+        if (msg.contains("ai_global_prompt")) g_aiGlobalPrompt = msg["ai_global_prompt"].get<std::string>();
         SaveConfig();
-        SendLog("Settings updated.");
     }
     else if (action == "simulate_text") {
-        std::string text = msg.value("text", "");
-        SimulateText(text);
+        if (msg.contains("text")) SimulateText(msg["text"].get<std::string>());
     }
-    else if (action == "add_mapping") {
-        {
-            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            Mapping m = { 0, 0, {}, 0, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
-            g_mappings.push_back(m);
-        }
-        SendMappingsToUI();
-        if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
-        SendLog("Manual mapping added.");
-    }
-    else if (action == "open_settings") {
-        // Overlay is handled in JS, but we could trigger it from backend if needed
-    }
-    else if (action == "clear_log") {
-        // Handled in JS, but could do backend cleanup if needed
-    }
-    else if (action == "scan_ports") {
-        ScanMidiPorts();
-    }
-    else if (action == "show_about") {
-        MessageBox(g_hwndMain,
-            L"MIDITypist v1.1\n"
-            L"Modern MIDI-to-Keyboard Mapper\n\n"
-            L"Features:\n"
-            L"\x2022 Hybrid WebView2 Architecture\n"
-            L"\x2022 Premium Glassmorphism UI\n"
-            L"\x2022 Zero-latency C++ MIDI Engine\n\n"
-            L"(C) 2026",
-            L"About MIDITypist", MB_OK | MB_ICONINFORMATION);
+    else if (action == "drag_window") {
+        ReleaseCapture();
+        SendMessage(g_hwndMain, WM_NCLBUTTONDOWN, HTCAPTION, 0);
     }
     else if (action == "minimize_window") {
-        ShowWindow(g_hwndMain, SW_MINIMIZE);
+        if (g_minimizeToTrayEnabled) MinimizeToTray(g_hwndMain);
+        else ShowWindow(g_hwndMain, SW_MINIMIZE);
     }
     else if (action == "maximize_window") {
         if (IsZoomed(g_hwndMain)) ShowWindow(g_hwndMain, SW_RESTORE);
@@ -1280,11 +328,6 @@ void HandleWebMessage(const std::string& messageStr) {
     }
     else if (action == "close_window") {
         PostMessage(g_hwndMain, WM_CLOSE, 0, 0);
-    }
-    else if (action == "drag_window") {
-        // Native trick to seamlessly start dragging a borderless window
-        ReleaseCapture();
-        SendMessage(g_hwndMain, WM_NCLBUTTONDOWN, HTCAPTION, 0);
     }
 }
 
@@ -1295,73 +338,67 @@ void HandleWebMessage(const std::string& messageStr) {
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
-        g_hwndMain = hwnd;
-        if (g_appSwitchingEnabled) StartAppMonitoring();
-        SetTimer(hwnd, RECONNECT_TIMER_ID, RECONNECT_INTERVAL, NULL);
-        SetTimer(hwnd, PIANO_DECAY_TIMER, PIANO_DECAY_MS, NULL);
-        AddTrayIcon(hwnd);
         break;
+
     case WM_GETMINMAXINFO: {
-        MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-        HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi = { sizeof(mi) };
-        if (GetMonitorInfo(hMonitor, &mi)) {
+        // Enforce minimum window size + correct maximize behavior
+        LPMINMAXINFO mmi = (LPMINMAXINFO)lParam;
+        int dpi = GetDpiForWindow(hwnd);
+        float scale = dpi / 96.0f;
+        mmi->ptMinTrackSize.x = (int)(750 * scale);
+        mmi->ptMinTrackSize.y = (int)(450 * scale);
+        // Respect the taskbar
+        HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfo(hmon, &mi)) {
             mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left;
             mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
             mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
             mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
         }
-        
-        // Prevent window from becoming too small
-        UINT dpi = GetDpiForWindow(hwnd);
-        int minWidth = MulDiv(750, dpi, 96);
-        int minHeight = MulDiv(450, dpi, 96);
-        mmi->ptMinTrackSize.x = minWidth;
-        mmi->ptMinTrackSize.y = minHeight;
-        
         return 0;
     }
+
     case WM_SIZE:
         if (g_controller) {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            g_controller->put_Bounds(rc);
+            RECT bounds;
+            GetClientRect(hwnd, &bounds);
+            g_controller->put_Bounds(bounds);
         }
         break;
+    
     case WM_TIMER:
+        // Gesture timers (one per note)
         if (wParam >= GESTURE_TIMER_ID && wParam < GESTURE_TIMER_ID + 128) {
-            int note = (int)(wParam - GESTURE_TIMER_ID);
+            int noteNum = (int)(wParam - GESTURE_TIMER_ID);
             KillTimer(hwnd, wParam);
             
-            int finalTapCount = 0;
-            {
-                std::lock_guard<std::mutex> lock(g_gestureMutex);
-                auto& state = g_keyStates[note];
-                finalTapCount = state.tapCount;
-                state.tapCount = 0;
-                state.processingGesture = false;
-            }
+            std::lock_guard<std::mutex> lock(g_gestureMutex);
+            auto& ks = g_keyStates[noteNum];
+            int taps = ks.tapCount;
+            ks.tapCount = 0;
+            ks.processingGesture = false;
             
-            if (finalTapCount == 1) ResolveGesture(note, 0); // Single
-            else if (finalTapCount == 2) ResolveGesture(note, 1); // Double
-            return 0;
+            if (taps >= 2) {
+                ResolveGesture(noteNum, 1); // Double Tap
+            } else if (taps == 1) {
+                ResolveGesture(noteNum, 0); // Single Tap
+            }
         }
-        if (wParam == RECONNECT_TIMER_ID) {
+        else if (wParam == RECONNECT_TIMER_ID) {
             TryAutoReconnect();
         }
         else if (wParam == PIANO_DECAY_TIMER) {
-            // Sparse piano decay: only send changed keys
             json changes = json::array();
             for (int i = 0; i < PIANO_TOTAL_KEYS; i++) {
                 if (g_pianoVelocity[i] > 0) {
-                    int decayed = g_pianoVelocity[i] - 8;
-                    g_pianoVelocity[i] = (decayed > 0) ? decayed : 0;
+                    g_pianoVelocity[i] -= 8;
+                    if (g_pianoVelocity[i] < 0) g_pianoVelocity[i] = 0;
                     changes.push_back({{"k", i}, {"v", g_pianoVelocity[i]}});
                 }
             }
-            if (!changes.empty()) {
-                PostToWebView({ {"type", "piano_decay"}, {"keys", changes} });
-            }
+            if (!changes.empty()) PostToWebView({ {"type", "piano_decay"}, {"keys", changes} });
         }
         else if (wParam == CHORD_TIMER_ID) {
             KillTimer(hwnd, CHORD_TIMER_ID);
@@ -1371,17 +408,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 chord = g_chordBuffer;
                 g_chordBuffer.clear();
             }
-            ProcessChord(chord);
-        }
-        break;
-    case WM_CHORD_SIGNAL:
-        if (!g_learning) {
-            KillTimer(hwnd, CHORD_TIMER_ID);
-            SetTimer(hwnd, CHORD_TIMER_ID, CHORD_THRESHOLD_MS, NULL);
+            if (!chord.empty()) ProcessChord(chord);
         }
         break;
 
-    case WM_UI_BRIDGE_SIGNAL:
+    case WM_CHORD_SIGNAL: {
+        // Reset and start chord timer each time a new note arrives
+        KillTimer(hwnd, CHORD_TIMER_ID);
+        SetTimer(hwnd, CHORD_TIMER_ID, CHORD_THRESHOLD_MS, NULL);
+        break;
+    }
+
+    case WM_UI_BRIDGE_SIGNAL: {
+        // Drain queued messages from MIDI thread
         while (true) {
             json msg;
             {
@@ -1397,125 +436,136 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
         }
         break;
-
-    case WM_LEARN_MIDI_SIGNAL:
-    {
-        int type = (int)wParam;
-        int num = (int)lParam;
-        std::lock_guard<std::mutex> lock(g_learnMutex);
-        if (g_learning && g_learn_pending.midi_type == -1) {
-            // Grace period: ignore events too close to start
-            if (GetTickCount64() - g_learnStartTime < 200) {
-                return 0;
-            }
-
-            g_learn_pending.midi_type = type;
-            g_learn_pending.midi_num = num;
-            
-            SendLog("Capture: MIDI " + std::string(type == 0 ? "Note " : "CC ") + std::to_string(num));
-            SendLog("Transitioning to Phase 2 (Keyboard Capture)");
-            
-            PostToWebView({ {"type", "learn_phase"}, {"phase", 2}, {"text", "Now press a keyboard key..."} });
-            SendStatus("Waiting for keyboard key...");
-
-            if (g_hKeyboardHook) UnhookWindowsHookEx(g_hKeyboardHook);
-            g_hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
-        }
     }
-    break;
+
+    case WM_LEARN_MIDI_SIGNAL: {
+        // Process learning capture from MIDI callback thread
+        int learnedType = (int)wParam;
+        int learnedNum = (int)lParam;
+
+        // Grace period to prevent capturing accidental events at the start
+        ULONGLONG elapsed = GetTickCount64() - g_learnStartTime;
+        if (elapsed < 200) break; // Ignore events in the first 200ms
+
+        std::lock_guard<std::mutex> lock(g_learnMutex);
+        if (!g_learning || g_learn_pending.midi_type != -1) break;
+
+        g_learn_pending.midi_type = learnedType;
+        g_learn_pending.midi_num = learnedNum;
+
+        std::string name = (learnedType == 0) ? "Note " + std::to_string(learnedNum) : "CC " + std::to_string(learnedNum);
+        PostToWebView({ {"type", "learn_phase"}, {"phase", 2}, {"text", "Got " + name + ". Press a key to assign..."} });
+        SendLog("Captured MIDI: " + name + ". Waiting for key...");
+
+        // Install keyboard hook for phase 2
+        g_hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
+        break;
+    }
+
     case WM_USER + 100: {
+        // Profile slot switch (from ProcessMIDIEvent)
         int slot = (int)wParam;
         if (slot >= 0 && slot < (int)g_profileSlots.size()) {
-            LoadMappings(g_profileSlots[slot]);
-            SendLog("Switched to profile slot #" + std::to_string(slot));
-            SendStatus("Profile switched via MIDI.");
+            if (!g_profileSlots[slot].empty()) {
+                LoadMappings(g_profileSlots[slot]);
+                SendLog("Switched to profile slot #" + std::to_string(slot));
+            }
         }
         break;
     }
+
     case WM_TRAYICON:
         if (lParam == WM_LBUTTONDBLCLK) {
             RestoreFromTray(hwnd);
         }
-        else if (lParam == WM_RBUTTONUP) {
+        else if (lParam == WM_RBUTTONDOWN) {
             POINT pt;
             GetCursorPos(&pt);
             HMENU hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_SHOW, L"Show MIDITypist");
-            AppendMenu(hMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenu(hMenu, MF_STRING, ID_TRAY_SHOW, L"Show");
             AppendMenu(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
             SetForegroundWindow(hwnd);
             TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, NULL);
             DestroyMenu(hMenu);
         }
         break;
+
     case WM_COMMAND:
         if (LOWORD(wParam) == ID_TRAY_SHOW) RestoreFromTray(hwnd);
-        else if (LOWORD(wParam) == ID_TRAY_EXIT) DestroyWindow(hwnd);
+        else if (LOWORD(wParam) == ID_TRAY_EXIT) {
+            RemoveTrayIcon();
+            DestroyWindow(hwnd);
+        }
         break;
+
     case WM_CLOSE:
         if (g_minimizeToTrayEnabled) {
             MinimizeToTray(hwnd);
-        } else {
-            DestroyWindow(hwnd);
+            return 0;
         }
+        DestroyWindow(hwnd);
         return 0;
+
     case WM_DESTROY: {
-        if (g_hKeyboardHook) { UnhookWindowsHookEx(g_hKeyboardHook); g_hKeyboardHook = NULL; }
-        // Release all held keys to prevent stuck keys at OS level
+        // Graceful shutdown: release all held keys
+        for (int i = 0; i < 128; i++) {
+            if (g_pianoPhysicalDown[i].load(std::memory_order_relaxed)) {
+                // Release any key that might be held
+                std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+                for (const auto& m : g_mappings) {
+                    if (m.midi_type == 0 && m.midi_num == i) {
+                        SendKeyInput(m.key_vk, false, m.modifiers);
+                    }
+                }
+            }
+        }
+        // Release sustained keys
         {
             std::lock_guard<std::mutex> lock(g_sustainMutex);
             for (int vk : g_sustainedVKs) SendKeyInput(vk, false);
             g_sustainedVKs.clear();
-            g_sustainActive = false;
         }
-        {
-            std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
-            for (int i = 0; i < 128; i++) {
-                if (g_pianoPhysicalDown[i].load(std::memory_order_relaxed)) {
-                    for (const auto& m : g_mappings) {
-                        if (m.midi_type == 0 && m.midi_num == i && m.gesture_id == 0 && m.enabled) {
-                            SendKeyInput(m.key_vk, false, m.modifiers);
-                        }
-                    }
-                    g_pianoPhysicalDown[i].store(false, std::memory_order_relaxed);
-                }
-            }
-        }
+
+        // Save state
         SaveConfig();
         if (!g_lastProfilePath.empty()) SaveMappings(g_lastProfilePath);
-        KillTimer(hwnd, RECONNECT_TIMER_ID);
-        KillTimer(hwnd, PIANO_DECAY_TIMER);
-        KillTimer(hwnd, CHORD_TIMER_ID);
-        if (g_hWinEventHook) { UnhookWinEvent(g_hWinEventHook); g_hWinEventHook = nullptr; }
+
+        // Cleanup hooks
+        if (g_hKeyboardHook) { UnhookWindowsHookEx(g_hKeyboardHook); g_hKeyboardHook = NULL; }
+        StopAppMonitoring();
         RemoveTrayIcon();
-        g_midiIn.reset();
-        g_webview = nullptr;
+        DisconnectMidi();
+
         g_controller = nullptr;
+        g_webview = nullptr;
         PostQuitMessage(0);
-        return 0;
+        break;
     }
+
     case WM_NCHITTEST: {
-        // Allow resizing across the borderless window edges
-        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
-        if (hit == HTCLIENT) {
-            POINT pt;
-            pt.x = GET_X_LPARAM(lParam);
-            pt.y = GET_Y_LPARAM(lParam);
-            ScreenToClient(hwnd, &pt);
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            int border = 8;
-            if (pt.y < border && pt.x < border) return HTTOPLEFT;
-            if (pt.y < border && pt.x >= rc.right - border) return HTTOPRIGHT;
-            if (pt.y >= rc.bottom - border && pt.x < border) return HTBOTTOMLEFT;
-            if (pt.y >= rc.bottom - border && pt.x >= rc.right - border) return HTBOTTOMRIGHT;
-            if (pt.y < border) return HTTOP;
-            if (pt.y >= rc.bottom - border) return HTBOTTOM;
-            if (pt.x < border) return HTLEFT;
-            if (pt.x >= rc.right - border) return HTRIGHT;
-        }
-        return hit;
+        // Custom hit-testing for borderless window resizing
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        ScreenToClient(hwnd, &pt);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int border = 8; // resize border width
+
+        LRESULT hit = HTCLIENT;
+        if (pt.y < border && pt.x < border) hit = HTTOPLEFT;
+        else if (pt.y < border && pt.x >= rc.right - border) hit = HTTOPRIGHT;
+        else if (pt.y >= rc.bottom - border && pt.x < border) hit = HTBOTTOMLEFT;
+        else if (pt.y >= rc.bottom - border && pt.x >= rc.right - border) hit = HTBOTTOMRIGHT;
+        else if (pt.y < border) hit = HTTOP;
+        else if (pt.y >= rc.bottom - border) hit = HTBOTTOM;
+        else if (pt.x < border) hit = HTLEFT;
+        else if (pt.x >= rc.right - border) hit = HTRIGHT;
+
+        if (hit != HTCLIENT) return hit;
+        break;
     }
+
+    default:
+        break;
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
@@ -1525,7 +575,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 // ══════════════════════════════════════════
 
 void InitWebView2(HWND hwnd) {
-    // Determine the path to the 'ui' folder
+    // Find UI directory
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     std::wstring exeDir(exePath);
@@ -1533,81 +583,61 @@ void InitWebView2(HWND hwnd) {
 
     std::wstring uiPath;
     std::vector<std::wstring> potentialPaths = {
-        exeDir + L"ui",                                 // Local (Installed structure)
-        exeDir + L"..\\..\\MIDI Mapper\\src\\ui",       // Dev (main/x64/Debug -> main/MIDI Mapper/src/ui)
-        exeDir + L"..\\src\\ui",                        // Alternative dev
-        exeDir                                          // Root fallback
+        exeDir + L"ui",                           // Installed layout
+        exeDir + L"..\\..\\MIDI Mapper\\src\\ui",  // Dev build from VS output
+        exeDir + L"..\\src\\ui",                    // Alt dev layout
+        exeDir                                      // Fallback
     };
-
-    for (const auto& path : potentialPaths) {
-        std::wstring checkFile = path + L"\\index.html";
-        if (GetFileAttributesW(checkFile.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            uiPath = path;
+    for (auto& p : potentialPaths) {
+        DWORD attr = GetFileAttributesW(p.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            uiPath = p;
             break;
         }
     }
-
-    if (uiPath.empty()) {
-        std::wstring msg = L"Could not find 'ui\\index.html' in potential locations.\n\nChecked near:\n" + exeDir + 
-                          L"\n\nPlease ensure the 'ui' folder containing 'index.html' is next to the executable.";
-        MessageBox(hwnd, msg.c_str(), L"MIDITypist Error", MB_ICONERROR);
-        return;
-    }
+    if (uiPath.empty()) uiPath = exeDir;
 
     CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd, uiPath](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                if (FAILED(result) || !env) return result;
-
+                if (FAILED(result)) return result;
                 env->CreateCoreWebView2Controller(hwnd,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [hwnd, uiPath](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                            if (FAILED(result)) return result;
                             g_controller = controller;
-                            controller->get_CoreWebView2(&g_webview);
-
-                            // Setup Draggable Regions
-                            wil::com_ptr<ICoreWebView2CompositionController> compController;
-                            if (SUCCEEDED(controller->QueryInterface(IID_PPV_ARGS(&compController)))) {
-                                // For composition, handling drag is more complex, but standard controllers
-                                // handle -webkit-app-region automatically if enabled in settings in newer WebView2.
-                            }
-
-                            wil::com_ptr<ICoreWebView2_2> webview2_2;
-                            if (SUCCEEDED(g_webview->QueryInterface(IID_PPV_ARGS(&webview2_2)))) {
-                                // WebView2 automatically handles -webkit-app-region: drag 
-                                // and returns HTCAPTION for NCHITTEST messages if properly configured.
-                                // We just need to make sure we don't swallow it.
-                            }
+                            g_controller->get_CoreWebView2(&g_webview);
 
                             // Settings
                             wil::com_ptr<ICoreWebView2Settings> settings;
                             g_webview->get_Settings(&settings);
                             settings->put_IsScriptEnabled(TRUE);
-                            settings->put_AreDefaultScriptDialogsEnabled(TRUE);
                             settings->put_IsWebMessageEnabled(TRUE);
                             settings->put_AreDevToolsEnabled(TRUE);
-                            settings->put_IsStatusBarEnabled(FALSE);
-                            settings->put_IsZoomControlEnabled(FALSE);
 
-                            // Virtual Host Mapping (Secure and robust way to load local files)
+                            // Virtual Host Mapping
                             wil::com_ptr<ICoreWebView2_3> webView3;
-                            if (SUCCEEDED(g_webview->QueryInterface(IID_PPV_ARGS(&webView3)))) {
+                            g_webview.query_to(&webView3);
+                            if (webView3) {
                                 webView3->SetVirtualHostNameToFolderMapping(
                                     L"app.miditypist", uiPath.c_str(),
                                     COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                             }
 
-                            // Make background transparent
+                            // Transparent background
                             wil::com_ptr<ICoreWebView2Controller2> controller2;
-                            if (SUCCEEDED(controller->QueryInterface(IID_PPV_ARGS(&controller2)))) {
+                            g_controller.query_to(&controller2);
+                            if (controller2) {
                                 COREWEBVIEW2_COLOR transparent = { 0, 0, 0, 0 };
                                 controller2->put_DefaultBackgroundColor(transparent);
                             }
 
-                            RECT rc;
-                            GetClientRect(hwnd, &rc);
-                            controller->put_Bounds(rc);
+                            // Size to window
+                            RECT bounds;
+                            GetClientRect(hwnd, &bounds);
+                            g_controller->put_Bounds(bounds);
 
+                            // Handle messages from JS
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                                     [](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
@@ -1619,12 +649,11 @@ void InitWebView2(HWND hwnd) {
                                         return S_OK;
                                     }).Get(), nullptr);
 
-                            // Navigate to the virtual domain
+                            // Navigate
                             g_webview->Navigate(L"https://app.miditypist/index.html");
 
                             return S_OK;
                         }).Get());
-
                 return S_OK;
             }).Get());
 }
@@ -1633,106 +662,107 @@ void InitWebView2(HWND hwnd) {
 //  Entry Point
 // ══════════════════════════════════════════
 
-int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR pCmdLine, _In_ int nCmdShow) {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-    // Initialize COM for WebView2
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr)) return 1;
-
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     g_hInst = hInstance;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    // Load persistent config
     g_configPath = GetConfigDir() + L"midityper_config.json";
     LoadConfig();
 
-    INITCOMMONCONTROLSEX icc = { sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES };
-    InitCommonControlsEx(&icc);
-
-    const wchar_t CLASS_NAME[] = L"MIDITypist";
-    WNDCLASS wc = {};
+    WNDCLASSEX wc = {};
+    wc.cbSize = sizeof(WNDCLASSEX);
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = L"MIDITypistClass";
     wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    RegisterClass(&wc);
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    RegisterClassEx(&wc);
 
-    HWND hwnd = CreateWindowEx(0, CLASS_NAME, L"MIDITypist",
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU, 
-        CW_USEDEFAULT, CW_USEDEFAULT, 1140, 640,
+    g_hwndMain = CreateWindowEx(
+        WS_EX_APPWINDOW,
+        L"MIDITypistClass", L"MIDITypist",
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1100, 700,
         nullptr, nullptr, hInstance, nullptr);
 
-    // Apply dark mode & Mica backdrop
-    BOOL dark = TRUE;
-    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-    
-    // Windows 11 Mica (Fallbacks for different OS versions)
-    int micaVal = 1;
-    DwmSetWindowAttribute(hwnd, 1029 /*DWMWA_MICA_EFFECT*/, &micaVal, sizeof(micaVal));
-    int backdrop = 2; // DWMSBT_MAINWINDOW
-    DwmSetWindowAttribute(hwnd, 38 /*DWMWA_SYSTEMBACKDROP_TYPE*/, &backdrop, sizeof(backdrop));
+    // DWM: Dark title bar + Mica Effect
+    BOOL darkMode = TRUE;
+    DwmSetWindowAttribute(g_hwndMain, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
+    int backdropType = 2; // DWMSBT_MAINWINDOW (Mica)
+    DwmSetWindowAttribute(g_hwndMain, 38, &backdropType, sizeof(backdropType)); // DWMWA_SYSTEMBACKDROP_TYPE
+    MARGINS margins = { -1, -1, -1, -1 };
+    DwmExtendFrameIntoClientArea(g_hwndMain, &margins);
 
-    MARGINS margins = { -1 };
-    DwmExtendFrameIntoClientArea(hwnd, &margins);
+    ShowWindow(g_hwndMain, nCmdShow);
+    UpdateWindow(g_hwndMain);
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
+    InitWebView2(g_hwndMain);
+    AddTrayIcon(g_hwndMain);
 
-    // Initialize WebView2
-    InitWebView2(hwnd);
+    // Start app-monitoring & timers
+    if (g_appSwitchingEnabled) StartAppMonitoring();
+    SetTimer(g_hwndMain, RECONNECT_TIMER_ID, RECONNECT_INTERVAL, NULL);
+    SetTimer(g_hwndMain, PIANO_DECAY_TIMER, PIANO_DECAY_MS, NULL);
 
-    MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    MSG msgLoop;
+    while (GetMessage(&msgLoop, nullptr, 0, 0)) {
+        TranslateMessage(&msgLoop);
+        DispatchMessage(&msgLoop);
     }
 
     CoUninitialize();
-    return 0;
+    return (int)msgLoop.wParam;
 }
+
+// ══════════════════════════════════════════
+//  Low-Level Keyboard Hook (Learning Mode)
+// ══════════════════════════════════════════
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && wParam == WM_KEYDOWN) {
         KBDLLHOOKSTRUCT* pKey = (KBDLLHOOKSTRUCT*)lParam;
-        
-        {
-            std::lock_guard<std::mutex> lock(g_learnMutex);
-            if (g_learning && g_learn_pending.midi_type != -1) {
-                int vk = pKey->vkCode;
-                int mods = 0;
-                if (GetKeyState(VK_CONTROL) & 0x8000) mods |= 1;
-                if (GetKeyState(VK_SHIFT) & 0x8000) mods |= 2;
-                if (GetKeyState(VK_MENU) & 0x8000) mods |= 4;
-
-                SendLog("Capture: Keyboard VK " + std::to_string(vk) + " Mods " + std::to_string(mods));
-                
-                g_learn_pending.key_vk = vk;
-                g_learn_pending.modifiers = mods;
-
-                {
-                    std::lock_guard<std::recursive_mutex> mlock(g_mappingsMutex);
-                    g_mappings.push_back(g_learn_pending);
-                }
-
-                // Finish capture
-                HHOOK h = g_hKeyboardHook;
-                g_hKeyboardHook = NULL;
-                g_learning = false;
-                UnhookWindowsHookEx(h);
-
-                std::wstring displayStr = L"Mapped MIDI ";
-                displayStr += (g_learn_pending.midi_type == 0 ? L"Note" : L"CC");
-                displayStr += L" " + std::to_wstring(g_learn_pending.midi_num);
-                displayStr += L" -> " + GetModifierString(g_learn_pending.modifiers) + GetKeyName(g_learn_pending.key_vk);
-                
-                SendLog(WideToUtf8(displayStr));
-                SendMappingsToUI();
-                SendStatus("Mapped successfully.");
-                PostToWebView({ {"type", "learn_done"} });
-                
-                return 1;
+        std::lock_guard<std::mutex> lock(g_learnMutex);
+        if (g_learning && g_learn_pending.midi_type != -1) {
+            int vk = pKey->vkCode;
+            // Ignore modifiers alone
+            if (vk == VK_CONTROL || vk == VK_SHIFT || vk == VK_MENU ||
+                vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                vk == VK_LSHIFT || vk == VK_RSHIFT ||
+                vk == VK_LMENU || vk == VK_RMENU) {
+                return CallNextHookEx(NULL, nCode, wParam, lParam);
             }
+
+            int mods = 0;
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) mods |= 1;
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) mods |= 2;
+            if (GetAsyncKeyState(VK_MENU) & 0x8000) mods |= 4;
+
+            g_learn_pending.key_vk = vk;
+            g_learn_pending.modifiers = mods;
+
+            // Add the new mapping
+            {
+                std::lock_guard<std::recursive_mutex> mlock(g_mappingsMutex);
+                g_mappings.push_back(g_learn_pending);
+            }
+            SendMappingsToUI();
+            SendLog("Mapping created: " + WideToUtf8(GetModifierString(mods) + GetKeyName(vk)));
+
+            // Reset
+            g_learning = false;
+            g_learn_pending = { -1, -1, {}, -1, 0, 1, 0, 0, -1, "", "", "", "", 0, true };
+            PostToWebView({ {"type", "learn_done"} });
+
+            // Unhook
+            PostMessage(g_hwndMain, WM_USER + 50, 0, 0); // Safe to unhook outside callback
+            return 1; // Block the key from reaching the OS
         }
     }
+
+    // Handle the unhook message
+    if (nCode < 0) return CallNextHookEx(NULL, nCode, wParam, lParam);
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

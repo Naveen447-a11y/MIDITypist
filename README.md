@@ -118,16 +118,29 @@ A 128-key piano strip at the bottom of the window:
 
 ## Technical Architecture
 
-The application utilizes a dual-layer hybrid architecture:
+The application utilizes a dual-layer hybrid architecture with a modular C++ backend.
 
-### Backend (C++/Win32)
-*   **MIDI Engine**: Low-latency real-time capture via the RtMidi library.
-*   **Input Driver**: Uses the Win32 `SendInput` API for system-level automation.
-*   **Capture Engine**: Utilizes Low-Level Keyboard Hooks (`WH_KEYBOARD_LL`) for reliable "Learning Mode" capture regardless of window focus.
+### Backend (C++/Win32) — Modular Design
+
+The backend is split into focused, single-responsibility modules:
+
+| Module | File(s) | Responsibility |
+|--------|---------|----------------|
+| **Main Entry** | `main.cpp` | Window procedure, WebView2 init, message dispatch, app lifecycle |
+| **MIDI Engine** | `midi_engine.h/cpp` | MIDI callback, chord detection, gesture state machine, port management |
+| **Input Simulation** | `input_simulation.h/cpp` | Keyboard, mouse, scroll, and text injection via Win32 `SendInput` |
+| **Bridge** | `bridge.h/cpp` | WebView2 message queue, utility functions, UI data serialization |
+| **Configuration** | `config.h/cpp` | Profile persistence and application settings (JSON) |
+| **App Context** | `app_context.h/cpp` | Foreground window monitoring via `SetWinEventHook` |
+| **System Tray** | `tray.h/cpp` | Tray icon, minimize-to-tray, restore |
+| **Shared State** | `globals.h` | All includes, defines, data structures, and extern declarations |
+
+**Key Design Decisions:**
 *   **Context Filter Optimization**: Window title and app path are pre-computed once per MIDI event, not per-mapping.
 *   **Sparse Piano Decay**: Only changed key states are sent to the UI, reducing bridge traffic by approximately 95%.
-*   **Verbose Logging Guard**: Hot-path logging is behind a flag to prevent performance degradation during normal operation.
-*   **Thread-Safe Sustain Management**: Sustain pedal state is managed with dedicated mutexes to prevent stuck keys.
+*   **Chord Bypass**: Chord detection is only active when chord-type mappings exist — single-note users get zero added latency.
+*   **Thread-Safe Design**: 7 dedicated mutexes + lock-free atomics protect shared state across the main thread and the RtMidi audio callback thread.
+*   **Graceful Shutdown**: All held and sustained keys are automatically released on exit, preventing phantom key presses.
 
 ### Frontend (WebView2 / Chromium)
 *   **Premium Interface**: A glassmorphic UI with layered elevation, gradient accents, and micro-animations.
@@ -138,9 +151,30 @@ The application utilizes a dual-layer hybrid architecture:
 
 ## Build Requirements (For Developers)
 
-*   **Compiler**: Visual Studio 2022.
+*   **Compiler**: Visual Studio 2022 with the C++ Desktop Development workload.
+*   **Language Standard**: C++20.
 *   **SDKs**: Windows 10/11 SDK, Microsoft WebView2 SDK, and WIL (available via NuGet).
 *   **Dependencies**: RtMidi (included in source), nlohmann/json (included in source).
+
+### Project Structure
+
+```
+src/
+├── main.cpp               # Entry point, WndProc, WebView2 init, HandleWebMessage
+├── globals.h              # Shared includes, defines, structs, extern declarations
+├── midi_engine.h/cpp      # MIDI callback, chord/gesture detection, port management
+├── input_simulation.h/cpp # Keyboard/mouse/text simulation via SendInput
+├── bridge.h/cpp           # WebView2 message bridge, utility functions
+├── config.h/cpp           # Profile and application config persistence
+├── app_context.h/cpp      # Foreground window monitoring (per-app switching)
+├── tray.h/cpp             # System tray integration
+├── RtMidi.cpp             # RtMidi library (third-party)
+├── json.hpp               # nlohmann/json library (third-party)
+└── ui/
+    ├── index.html         # Main HTML structure
+    ├── app.js             # Frontend logic and bridge communication
+    └── design_system.css  # CSS design token system
+```
 
 ---
 

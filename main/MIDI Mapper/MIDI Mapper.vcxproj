@@ -176,11 +176,24 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\bridge.cpp" />
+    <ClCompile Include="src\input_simulation.cpp" />
+    <ClCompile Include="src\config.cpp" />
+    <ClCompile Include="src\tray.cpp" />
+    <ClCompile Include="src\midi_engine.cpp" />
+    <ClCompile Include="src\app_context.cpp" />
     <ClCompile Include="src\RtMidi.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\RtMidi.h" />
     <ClInclude Include="src\json.hpp" />
+    <ClInclude Include="src\globals.h" />
+    <ClInclude Include="src\bridge.h" />
+    <ClInclude Include="src\input_simulation.h" />
+    <ClInclude Include="src\config.h" />
+    <ClInclude Include="src\tray.h" />
+    <ClInclude Include="src\midi_engine.h" />
+    <ClInclude Include="src\app_context.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\rc.rc" />
