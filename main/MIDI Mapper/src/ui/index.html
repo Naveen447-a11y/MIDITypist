@@ -556,6 +556,27 @@
     }
   </style>
 
+  <!-- Confirmation Modal -->
+  <div id="modalConfirm"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(24px); z-index:2000; align-items:center; justify-content:center; animation:fadeIn 0.2s ease;">
+    <div
+      style="width:400px; padding:32px; background:var(--bg-main); border:1px solid var(--border); border-radius:var(--radius-xl); box-shadow:var(--shadow-lg); text-align:center;">
+      <div style="width:64px; height:64px; background:rgba(255, 59, 48, 0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 24px;">
+        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="var(--error)" stroke-width="2">
+          <path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      </div>
+      <h2 id="confirmTitle" style="font-size:20px; font-weight:700; margin-bottom:12px; color:var(--text-primary);">Clear All Mappings?</h2>
+      <p id="confirmMessage" style="color:var(--text-tertiary); font-size:14px; margin-bottom:32px; line-height:1.5;">Are you sure you want to clear all mappings? This cannot be undone.</p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <button id="confirmBtnAction" class="btn btn-primary" style="background:var(--error); border-color:var(--error);" onclick="executeConfirm()">Clear All</button>
+        <button class="btn btn-secondary" onclick="closeConfirm()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 

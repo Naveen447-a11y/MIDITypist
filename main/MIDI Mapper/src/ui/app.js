@@ -345,10 +345,31 @@ function initPiano() {
     }
 }
 
+let pendingConfirmAction = null;
+
 function clearMappings() {
-    if (confirm("Are you sure you want to clear all mappings? This cannot be undone.")) {
-        send('clear_mappings');
-    }
+    showConfirm(
+        "Clear All Mappings?",
+        "Are you sure you want to clear all mappings? This cannot be undone.",
+        () => { send('clear_mappings'); }
+    );
+}
+
+function showConfirm(title, message, action) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    pendingConfirmAction = action;
+    document.getElementById('modalConfirm').style.display = 'flex';
+}
+
+function executeConfirm() {
+    if (pendingConfirmAction) pendingConfirmAction();
+    closeConfirm();
+}
+
+function closeConfirm() {
+    document.getElementById('modalConfirm').style.display = 'none';
+    pendingConfirmAction = null;
 }
 
 function addLog(text, cat) {
