@@ -68,6 +68,7 @@ A floating status bar centered in the header displays:
 *   **Connection Status**: Breathing animated dot (green = connected, red = disconnected).
 *   **Device Selector**: Inline MIDI port dropdown with power toggle.
 *   **Active Context**: Live display of the focused application and window title.
+*   **Hover Tooltips**: Native browser tooltips reveal full text for truncated app and window titles.
 *   **Quick Actions**: One-click Capture Mapping and Manual Entry buttons.
 
 ### Mapping Cards
@@ -80,6 +81,7 @@ Each mapping is displayed as a rich information card featuring:
 *   **Velocity Zone Indicators**: Soft/Hard badges shown when velocity sensitivity is configured.
 *   **Mini Toggle Switch**: Enable/disable each mapping with a macOS-style toggle.
 *   **3D Tilt Effect**: Cards subtly tilt toward the cursor on hover.
+*   **Hover Tooltips**: Tooltips reveal full text for truncated app context filters and title patterns.
 *   **Staggered Entry Animation**: Cards animate in sequentially with 30ms delay.
 
 ### Edit Modal

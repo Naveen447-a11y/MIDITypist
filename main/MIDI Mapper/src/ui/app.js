@@ -229,6 +229,14 @@ function updateMappings(list) {
             const pill = document.createElement('span');
             pill.className = 'context-pill';
             pill.textContent = m.app_pattern;
+            pill.title = `App Match: ${m.app_pattern}`;
+            badgeRow.appendChild(pill);
+        }
+        if (m.title_pattern) {
+            const pill = document.createElement('span');
+            pill.className = 'context-pill';
+            pill.textContent = m.title_pattern;
+            pill.title = `Title Match: ${m.title_pattern}`;
             badgeRow.appendChild(pill);
         }
         const delBtn = document.createElement('button');
@@ -426,7 +434,9 @@ function updateContext(app, title) {
     // 2. Wait for fade out, swap text, fade back in
     setTimeout(() => {
         appEl.textContent = app || 'Desktop';
+        appEl.title = app || 'Desktop';
         titleEl.textContent = title || 'Untitled';
+        titleEl.title = title || 'Untitled';
 
         if (ctxEl) {
             // Force a reflow so the browser registers the text change before removing the class
