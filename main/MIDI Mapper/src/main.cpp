@@ -199,6 +199,18 @@ void HandleWebMessage(const std::string& messageStr) {
         }
         SendMappingsToUI();
     }
+    else if (action == "duplicate_mapping") {
+    int idx = msg.value("index", -1);
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mappingsMutex);
+        if (idx >= 0 && idx < (int)g_mappings.size()) {
+            g_mappings.push_back(g_mappings[idx]);
+        }
+    }
+
+    SendMappingsToUI();
+    }   
     else if (action == "toggle_mapping") {
         int idx = msg.value("index", -1);
         {

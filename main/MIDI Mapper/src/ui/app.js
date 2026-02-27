@@ -622,6 +622,17 @@ function toggleConnect() {
     const port = parseInt(portEl.value);
     send('toggle_connect', { port });
 }
+function duplicateMapping(i) {
+    const mapping = mappings[i];
+    if (!mapping) return;
+
+    // Send to backend to duplicate
+    send('duplicate_mapping', { index: i });
+
+    // Optional: local UI duplicate for instant feedback
+    // mappings.push({ ...mapping });
+    // updateMappings(mappings);
+}
 
 function updateSettings() {
     send('update_config', {
